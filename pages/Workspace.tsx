@@ -243,7 +243,7 @@ const Workspace: React.FC = () => {
     const location = useLocation();
     const { id } = useParams<{ id: string }>();
 
-    const [zoom, setZoom] = useState(50);
+    const [zoom, setZoom] = useState(30);
     const [pan, setPan] = useState({ x: 0, y: 0 });
     const [elements, setElements] = useState<CanvasElement[]>([]);
     const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
@@ -255,14 +255,14 @@ const Workspace: React.FC = () => {
     const [isDraggingElement, setIsDraggingElement] = useState(false);
     const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
     const [elementStartPos, setElementStartPos] = useState({ x: 0, y: 0 });
-    const groupDragStartRef = useRef<Record<string, {x: number, y: number}>>({});
+    const groupDragStartRef = useRef<Record<string, { x: number, y: number }>>({});
     // 框选 (marquee selection)
     const [isMarqueeSelecting, setIsMarqueeSelecting] = useState(false);
     const [marqueeStart, setMarqueeStart] = useState({ x: 0, y: 0 });
     const [marqueeEnd, setMarqueeEnd] = useState({ x: 0, y: 0 });
     const [selectedElementIds, setSelectedElementIds] = useState<string[]>([]);
     // 智能对齐线
-    const [alignGuides, setAlignGuides] = useState<{type: 'h' | 'v', pos: number}[]>([]);
+    const [alignGuides, setAlignGuides] = useState<{ type: 'h' | 'v', pos: number }[]>([]);
     const [isResizing, setIsResizing] = useState(false);
     const [resizeHandle, setResizeHandle] = useState<string | null>(null);
     const [resizeStart, setResizeStart] = useState({ x: 0, y: 0, width: 0, height: 0, left: 0, top: 0 });
@@ -279,6 +279,8 @@ const Workspace: React.FC = () => {
     const [showModelPicker, setShowModelPicker] = useState(false);
     const [showRatioPicker, setShowRatioPicker] = useState(false);
     const [showResPicker, setShowResPicker] = useState(false);
+    const [videoToolbarTab, setVideoToolbarTab] = useState<'frames' | 'motion'>('frames');
+    const [showFramePanel, setShowFramePanel] = useState(false);
     const [showFastEdit, setShowFastEdit] = useState(false);
     const [fastEditPrompt, setFastEditPrompt] = useState('');
     const [history, setHistory] = useState<HistoryState[]>([{ elements: [], markers: [] }]);
@@ -1307,15 +1309,7 @@ const Workspace: React.FC = () => {
                         const result = event.target?.result as string;
                         const img = new Image();
                         img.onload = () => {
-                            let w = img.width;
-                            let h = img.height;
-                            const maxDim = 800;
-                            if (w > maxDim || h > maxDim) {
-                                const ratio = w / h;
-                                if (w > h) { w = maxDim; h = maxDim / ratio; }
-                                else { h = maxDim; w = maxDim * ratio; }
-                            }
-                            addElement('image', result, { width: w, height: h });
+                            addElement('image', result, { width: img.width, height: img.height });
                         };
                         img.src = result;
                     };
@@ -1370,7 +1364,7 @@ const Workspace: React.FC = () => {
             if ((e.metaKey || e.ctrlKey) && e.key === '-') { e.preventDefault(); setZoom(z => Math.max(10, z - 10)); return; }
             if ((e.metaKey || e.ctrlKey) && e.key === '0') { e.preventDefault(); setZoom(100); return; }
             if (e.shiftKey && e.key === '1') { e.preventDefault(); fitToScreen(); return; }
-            if (e.code === 'Space' && !e.repeat) { const isTyping = document.activeElement?.tagName === 'TEXTAREA' || document.activeElement?.tagName === 'INPUT' || document.activeElement?.getAttribute('contenteditable') === 'true'; if (!isTyping) { e.preventDefault(); setIsSpacePressed(true); } }
+            if (e.code === 'Space' && !e.repeat) { const ae = document.activeElement as HTMLElement | null; const isTyping = ae?.tagName === 'TEXTAREA' || ae?.tagName === 'INPUT' || ae?.getAttribute('contenteditable') === 'true'; if (!isTyping) { e.preventDefault(); if (ae?.tagName === 'BUTTON') ae.blur(); setIsSpacePressed(true); } }
 
             if (e.key === 'Tab') {
                 e.preventDefault();
@@ -1393,7 +1387,19 @@ const Workspace: React.FC = () => {
                 return;
             }
 
-            if (document.activeElement?.tagName !== 'TEXTAREA' && document.activeElement?.tagName !== 'INPUT' && !document.activeElement?.getAttribute('contenteditable')) {
+            const ae = document.activeElement as HTMLElement | null;
+            const isInTextInput = ae?.tagName === 'TEXTAREA' || ae?.tagName === 'INPUT' || ae?.getAttribute('contenteditable') === 'true';
+            // Allow Delete/Backspace when focused textarea is empty (e.g. gen-node prompt)
+            if (isInTextInput && (e.key === 'Backspace' || e.key === 'Delete') && selectedElementId) {
+                const textContent = (ae as HTMLTextAreaElement | HTMLInputElement)?.value ?? ae?.textContent ?? '';
+                if (!textContent) {
+                    e.preventDefault();
+                    (ae as HTMLElement)?.blur();
+                    deleteSelectedElement();
+                }
+                return;
+            }
+            if (!isInTextInput) {
                 if (e.key.toLowerCase() === 'v' && !(e.metaKey || e.ctrlKey)) setActiveTool('select');
                 if (e.key.toLowerCase() === 'h') setActiveTool('hand');
                 if (e.key.toLowerCase() === 'm') setActiveTool('mark');
@@ -1447,8 +1453,8 @@ const Workspace: React.FC = () => {
     };
 
     const addText = () => { const containerW = window.innerWidth - (showAssistant ? 400 : 0); const containerH = window.innerHeight; const centerX = (containerW / 2 - pan.x) / (zoom / 100); const centerY = (containerH / 2 - pan.y) / (zoom / 100); const newElement: CanvasElement = { id: Date.now().toString(), type: 'text', text: 'Type something...', x: centerX - 100, y: centerY - 25, width: 200, height: 50, fontSize: 90, fontFamily: 'Inter', fontWeight: 400, fillColor: '#000000', strokeColor: 'transparent', textAlign: 'left', zIndex: elements.length + 1 }; const newElements = [...elements, newElement]; setElements(newElements); saveToHistory(newElements, markers); setSelectedElementId(newElement.id); };
-    const addGenImage = () => { const containerW = window.innerWidth - (showAssistant ? 400 : 0); const containerH = window.innerHeight; const centerX = (containerW / 2 - pan.x) / (zoom / 100); const centerY = (containerH / 2 - pan.y) / (zoom / 100); const newElement: CanvasElement = { id: Date.now().toString(), type: 'gen-image', x: centerX - 256, y: centerY - 256, width: 512, height: 512, zIndex: elements.length + 1, genModel: 'Nano Banana Pro', genAspectRatio: '1:1', genResolution: '1K', genPrompt: '' }; const newElements = [...elements, newElement]; setElements(newElements); saveToHistory(newElements, markers); setSelectedElementId(newElement.id); };
-    const addGenVideo = () => { const containerW = window.innerWidth - (showAssistant ? 400 : 0); const containerH = window.innerHeight; const centerX = (containerW / 2 - pan.x) / (zoom / 100); const centerY = (containerH / 2 - pan.y) / (zoom / 100); const newElement: CanvasElement = { id: Date.now().toString(), type: 'gen-video', x: centerX - 320, y: centerY - 180, width: 640, height: 360, zIndex: elements.length + 1, genModel: 'Veo 3.1 Fast', genAspectRatio: '16:9', genPrompt: '', genDuration: '5s' }; const newElements = [...elements, newElement]; setElements(newElements); saveToHistory(newElements, markers); setSelectedElementId(newElement.id); };
+    const addGenImage = () => { const containerW = window.innerWidth - (showAssistant ? 400 : 0); const containerH = window.innerHeight; const centerX = (containerW / 2 - pan.x) / (zoom / 100); const centerY = (containerH / 2 - pan.y) / (zoom / 100); const newElement: CanvasElement = { id: Date.now().toString(), type: 'gen-image', x: centerX - 512, y: centerY - 512, width: 1024, height: 1024, zIndex: elements.length + 1, genModel: 'Nano Banana Pro', genAspectRatio: '1:1', genResolution: '1K', genPrompt: '' }; const newElements = [...elements, newElement]; setElements(newElements); saveToHistory(newElements, markers); setSelectedElementId(newElement.id); };
+    const addGenVideo = () => { const containerW = window.innerWidth - (showAssistant ? 400 : 0); const containerH = window.innerHeight; const centerX = (containerW / 2 - pan.x) / (zoom / 100); const centerY = (containerH / 2 - pan.y) / (zoom / 100); const newElement: CanvasElement = { id: Date.now().toString(), type: 'gen-video', x: centerX - 960, y: centerY - 540, width: 1920, height: 1080, zIndex: elements.length + 1, genModel: 'Veo 3.1 Fast', genAspectRatio: '16:9', genPrompt: '', genDuration: '5s' }; const newElements = [...elements, newElement]; setElements(newElements); saveToHistory(newElements, markers); setSelectedElementId(newElement.id); };
 
     const getClosestAspectRatio = (width: number, height: number): string => { const ratio = width / height; let closest = '1:1'; let minDiff = Infinity; for (const ar of ASPECT_RATIOS) { const [w, h] = ar.value.split(':').map(Number); const r = w / h; const diff = Math.abs(ratio - r); if (diff < minDiff) { minDiff = diff; closest = ar.value; } } return closest; };
 
@@ -1531,15 +1537,7 @@ const Workspace: React.FC = () => {
             if (type === 'image') {
                 const img = new Image();
                 img.onload = () => {
-                    let w = img.width;
-                    let h = img.height;
-                    const maxDim = 800;
-                    if (w > maxDim || h > maxDim) {
-                        const ratio = w / h;
-                        if (w > h) { w = maxDim; h = maxDim / ratio; }
-                        else { h = maxDim; w = maxDim * ratio; }
-                    }
-                    addElement(type, result, { width: w, height: h });
+                    addElement(type, result, { width: img.width, height: img.height });
                     setShowInsertMenu(false);
                 };
                 img.src = result;
@@ -1590,7 +1588,7 @@ const Workspace: React.FC = () => {
 
     const handleContextMenu = (e: React.MouseEvent) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY }); };
     // Wheel handled by native listener in useEffect
-    const handleMouseDown = (e: React.MouseEvent) => { e.preventDefault(); if (contextMenu) setContextMenu(null); if (activeTool === 'hand' || e.button === 1 || e.buttons === 4 || isSpacePressed) { setIsPanning(true); setDragStart({ x: e.clientX, y: e.clientY }); return; } if (e.target === containerRef.current || e.target === canvasLayerRef.current) { setSelectedElementId(null); setSelectedElementIds([]); setEditingTextId(null); if (activeTool === 'select') { setIsMarqueeSelecting(true); setMarqueeStart({ x: e.clientX, y: e.clientY }); setMarqueeEnd({ x: e.clientX, y: e.clientY }); } else { setIsPanning(true); setDragStart({ x: e.clientX, y: e.clientY }); } setShowFontPicker(false); setShowModelPicker(false); setShowResPicker(false); setShowRatioPicker(false); } };
+    const handleMouseDown = (e: React.MouseEvent) => { e.preventDefault(); if (contextMenu) setContextMenu(null); if (activeTool === 'hand' || e.button === 1 || e.buttons === 4 || isSpacePressed) { (document.activeElement as HTMLElement)?.blur(); setIsPanning(true); setDragStart({ x: e.clientX, y: e.clientY }); return; } if (e.target === containerRef.current || e.target === canvasLayerRef.current) { (document.activeElement as HTMLElement)?.blur(); setSelectedElementId(null); setSelectedElementIds([]); setEditingTextId(null); if (activeTool === 'select') { setIsMarqueeSelecting(true); setMarqueeStart({ x: e.clientX, y: e.clientY }); setMarqueeEnd({ x: e.clientX, y: e.clientY }); } else { setIsPanning(true); setDragStart({ x: e.clientX, y: e.clientY }); } setShowFontPicker(false); setShowModelPicker(false); setShowResPicker(false); setShowRatioPicker(false); } };
 
     const handleMouseMove = (e: React.MouseEvent) => {
         if (isResizing && selectedElementId) {
@@ -1661,7 +1659,7 @@ const Workspace: React.FC = () => {
 
             // 智能对齐线计算（排除所有选中元素）
             const SNAP_THRESHOLD = 6;
-            const guides: {type: 'h' | 'v', pos: number}[] = [];
+            const guides: { type: 'h' | 'v', pos: number }[] = [];
             const draggingIds = selectedElementIds.length > 1 ? selectedElementIds : [selectedElementId];
             const others = elements.filter(el => !draggingIds.includes(el.id));
             const dragCX = newX + dragEl.width / 2;
@@ -1676,18 +1674,18 @@ const Workspace: React.FC = () => {
                 const oB = other.y + other.height;
 
                 // 垂直对齐 (V lines)
-                if (Math.abs(newX - other.x) < SNAP_THRESHOLD) { newX = other.x; guides.push({type: 'v', pos: other.x}); }
-                else if (Math.abs(dragR - oR) < SNAP_THRESHOLD) { newX = oR - dragEl.width; guides.push({type: 'v', pos: oR}); }
-                else if (Math.abs(dragCX - oCX) < SNAP_THRESHOLD) { newX = oCX - dragEl.width / 2; guides.push({type: 'v', pos: oCX}); }
-                else if (Math.abs(newX - oR) < SNAP_THRESHOLD) { newX = oR; guides.push({type: 'v', pos: oR}); }
-                else if (Math.abs(dragR - other.x) < SNAP_THRESHOLD) { newX = other.x - dragEl.width; guides.push({type: 'v', pos: other.x}); }
+                if (Math.abs(newX - other.x) < SNAP_THRESHOLD) { newX = other.x; guides.push({ type: 'v', pos: other.x }); }
+                else if (Math.abs(dragR - oR) < SNAP_THRESHOLD) { newX = oR - dragEl.width; guides.push({ type: 'v', pos: oR }); }
+                else if (Math.abs(dragCX - oCX) < SNAP_THRESHOLD) { newX = oCX - dragEl.width / 2; guides.push({ type: 'v', pos: oCX }); }
+                else if (Math.abs(newX - oR) < SNAP_THRESHOLD) { newX = oR; guides.push({ type: 'v', pos: oR }); }
+                else if (Math.abs(dragR - other.x) < SNAP_THRESHOLD) { newX = other.x - dragEl.width; guides.push({ type: 'v', pos: other.x }); }
 
                 // 水平对齐 (H lines)
-                if (Math.abs(newY - other.y) < SNAP_THRESHOLD) { newY = other.y; guides.push({type: 'h', pos: other.y}); }
-                else if (Math.abs(dragB - oB) < SNAP_THRESHOLD) { newY = oB - dragEl.height; guides.push({type: 'h', pos: oB}); }
-                else if (Math.abs(dragCY - oCY) < SNAP_THRESHOLD) { newY = oCY - dragEl.height / 2; guides.push({type: 'h', pos: oCY}); }
-                else if (Math.abs(newY - oB) < SNAP_THRESHOLD) { newY = oB; guides.push({type: 'h', pos: oB}); }
-                else if (Math.abs(dragB - other.y) < SNAP_THRESHOLD) { newY = other.y - dragEl.height; guides.push({type: 'h', pos: other.y}); }
+                if (Math.abs(newY - other.y) < SNAP_THRESHOLD) { newY = other.y; guides.push({ type: 'h', pos: other.y }); }
+                else if (Math.abs(dragB - oB) < SNAP_THRESHOLD) { newY = oB - dragEl.height; guides.push({ type: 'h', pos: oB }); }
+                else if (Math.abs(dragCY - oCY) < SNAP_THRESHOLD) { newY = oCY - dragEl.height / 2; guides.push({ type: 'h', pos: oCY }); }
+                else if (Math.abs(newY - oB) < SNAP_THRESHOLD) { newY = oB; guides.push({ type: 'h', pos: oB }); }
+                else if (Math.abs(dragB - other.y) < SNAP_THRESHOLD) { newY = other.y - dragEl.height; guides.push({ type: 'h', pos: other.y }); }
             }
             setAlignGuides(guides);
 
@@ -1797,7 +1795,7 @@ const Workspace: React.FC = () => {
                                 // 触发 inputBlocks 重新渲染
                                 setInputBlocks(prev => [...prev]);
                             }
-                        }).catch(() => {});
+                        }).catch(() => { });
                     }
                 }
             } catch (err) {
@@ -1811,7 +1809,7 @@ const Workspace: React.FC = () => {
             // 缩放聚焦动画 — 平滑缩放到标记位置（Lovart style）
             if (el && containerRef.current) {
                 const containerRect = containerRef.current.getBoundingClientRect();
-                const targetZoom = 150; // 放大到150%
+                const targetZoom = 100; // 放大到100%（不超过100%以保持全局视野）
                 const scale = targetZoom / 100;
                 // 标记在画布坐标系中的位置
                 const markerCanvasX = el.x + (el.width * x / 100);
@@ -1860,7 +1858,7 @@ const Workspace: React.FC = () => {
         if (el) setElementStartPos({ x: el.x, y: el.y });
         // 记录所有选中元素的初始位置（群拖用）
         const draggingIds = (selectedElementIds.length > 1 && selectedElementIds.includes(id)) ? selectedElementIds : [id];
-        const startMap: Record<string, {x: number, y: number}> = {};
+        const startMap: Record<string, { x: number, y: number }> = {};
         for (const did of draggingIds) {
             const d = elements.find(e => e.id === did);
             if (d) startMap[did] = { x: d.x, y: d.y };
@@ -2276,14 +2274,13 @@ const Workspace: React.FC = () => {
         if (!el.url && el.type === 'gen-image') {
             const toolbarTop = screenY + screenHeight + 16;
             return (
-                <div className="absolute bg-white rounded-2xl shadow-[0_4px_24px_rgba(0,0,0,0.08)] border border-gray-100 p-4 z-50 animate-in fade-in zoom-in-95 duration-200 -translate-x-1/2 w-[440px]" style={{ left: centerX, top: toolbarTop }} onMouseDown={(e) => e.stopPropagation()}>
+                <div className="absolute bg-white rounded-2xl shadow-[0_4px_24px_rgba(0,0,0,0.08)] border border-gray-100 p-4 z-50 animate-in fade-in zoom-in-95 duration-200 w-[440px]" style={{ left: 0, top: 0, transform: `translate(calc(${centerX}px - 50%), ${toolbarTop}px)`, willChange: 'transform' }} onMouseDown={(e) => e.stopPropagation()}>
                     <textarea
                         placeholder="今天我们要创作什么..."
                         className="w-full text-sm font-medium text-gray-700 placeholder:text-gray-300 bg-transparent border-none outline-none resize-none h-20 mb-4 p-1 leading-relaxed"
                         value={el.genPrompt || ''}
                         onChange={(e) => updateSelectedElement({ genPrompt: e.target.value })}
                         onKeyDown={(e) => e.stopPropagation()}
-                        autoFocus
                     />
 
                     <div className="flex items-center justify-between border-t border-gray-100/80 pt-4">
@@ -2360,13 +2357,9 @@ const Workspace: React.FC = () => {
                             <button
                                 onClick={() => handleGenImage(el.id)}
                                 disabled={!el.genPrompt || el.isGenerating}
-                                className={`h-9 px-5 rounded-xl flex items-center gap-2 text-xs font-bold shadow-sm transition-all ${!el.genPrompt || el.isGenerating
-                                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                        : 'bg-gray-900 text-white hover:bg-black hover:scale-105 active:scale-95 shadow-lg shadow-gray-200'
-                                    }`}
+                                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${!el.genPrompt || el.isGenerating ? 'bg-gray-200 text-gray-400' : 'bg-gray-300 hover:bg-black text-white'}`}
                             >
-                                {el.isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Zap size={14} className="text-yellow-300 fill-yellow-300" />}
-                                <span>10</span>
+                                {el.isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} fill="currentColor" />}
                             </button>
                         </div>
                     </div>
@@ -2485,7 +2478,7 @@ const Workspace: React.FC = () => {
 
         return (
             <>
-                <div className="absolute bg-white rounded-xl shadow-[0_4px_12px_rgba(0,0,0,0.08)] border border-gray-100 px-2 py-1.5 flex items-center gap-1 z-50 animate-in fade-in zoom-in-95 duration-200 -translate-x-1/2 whitespace-nowrap" style={{ left: centerX, top: topToolbarTop }} onMouseDown={(e) => e.stopPropagation()}>
+                <div className="absolute bg-white rounded-xl shadow-[0_4px_12px_rgba(0,0,0,0.08)] border border-gray-100 px-2 py-1.5 flex items-center gap-1 z-50 animate-in fade-in zoom-in-95 duration-200 whitespace-nowrap" style={{ left: 0, top: 0, transform: `translate(calc(${centerX}px - 50%), ${topToolbarTop}px)`, willChange: 'transform' }} onMouseDown={(e) => e.stopPropagation()}>
 
                     {/* Upscale */}
                     <div className="relative">
@@ -2550,7 +2543,7 @@ const Workspace: React.FC = () => {
                 </div>
 
                 {showFastEdit ? (
-                    <div className="absolute bg-white rounded-xl shadow-lg border border-gray-200 p-2 z-50 animate-in fade-in zoom-in-95 duration-200 -translate-x-1/2 w-64" style={{ left: centerX, top: bottomButtonTop }} onMouseDown={(e) => e.stopPropagation()}>
+                    <div className="absolute bg-white rounded-xl shadow-lg border border-gray-200 p-2 z-50 animate-in fade-in zoom-in-95 duration-200 w-64" style={{ left: 0, top: 0, transform: `translate(calc(${centerX}px - 50%), ${bottomButtonTop}px)`, willChange: 'transform' }} onMouseDown={(e) => e.stopPropagation()}>
                         <textarea autoFocus className="w-full text-sm text-gray-700 placeholder:text-gray-300 bg-transparent border-none outline-none resize-none h-16 mb-1 p-1" placeholder="Describe your edit here" value={fastEditPrompt} onChange={(e) => setFastEditPrompt(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleFastEditRun(); } e.stopPropagation(); }} />
                         <div className="flex justify-end">
                             <button onClick={handleFastEditRun} disabled={!fastEditPrompt || el.isGenerating} className="bg-gray-500 hover:bg-black text-white text-xs px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition disabled:opacity-50">
@@ -2560,7 +2553,7 @@ const Workspace: React.FC = () => {
                         </div>
                     </div>
                 ) : (
-                    <div onClick={() => setShowFastEdit(true)} className="absolute bg-white rounded-xl shadow-sm border border-gray-200 px-4 py-2 z-50 animate-in fade-in duration-300 -translate-x-1/2 flex items-center gap-2 cursor-pointer hover:shadow-md transition group" style={{ left: centerX, top: bottomButtonTop }} onMouseDown={(e) => e.stopPropagation()}>
+                    <div onClick={() => setShowFastEdit(true)} className="absolute bg-white rounded-xl shadow-sm border border-gray-200 px-4 py-2 z-50 animate-in fade-in duration-300 flex items-center gap-2 cursor-pointer hover:shadow-md transition group" style={{ left: 0, top: 0, transform: `translate(calc(${centerX}px - 50%), ${bottomButtonTop}px)`, willChange: 'transform' }} onMouseDown={(e) => e.stopPropagation()}>
                         <span className="text-sm text-gray-700 font-medium group-hover:text-black">快捷编辑</span>
                         <span className="text-xs text-gray-400 border border-gray-200 rounded px-1.5 py-0.5 ml-1">Tab</span>
                     </div>
@@ -2583,7 +2576,7 @@ const Workspace: React.FC = () => {
             const topToolbarTop = screenY - 60;
             const centerX = screenX + (screenWidth / 2);
             return (
-                <div className="absolute bg-white rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-100/50 px-2 py-1.5 flex items-center gap-1 z-50 animate-in fade-in zoom-in-95 duration-200 -translate-x-1/2 whitespace-nowrap backdrop-blur-sm" style={{ left: centerX, top: topToolbarTop }} onMouseDown={(e) => e.stopPropagation()}>
+                <div className="absolute bg-white rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-100/50 px-2 py-1.5 flex items-center gap-1 z-50 animate-in fade-in zoom-in-95 duration-200 whitespace-nowrap backdrop-blur-sm" style={{ left: 0, top: 0, transform: `translate(calc(${centerX}px - 50%), ${topToolbarTop}px)`, willChange: 'transform' }} onMouseDown={(e) => e.stopPropagation()}>
                     <button className="px-2.5 py-1.5 text-gray-600 hover:text-black hover:bg-gray-50 rounded-lg flex items-center gap-2 text-xs font-medium transition-colors group">
                         <div className="border-[1.5px] border-current rounded-[3px] px-0.5 text-[8px] font-bold opacity-70 group-hover:opacity-100 transition-opacity">HD</div>
                         放大
@@ -2603,38 +2596,90 @@ const Workspace: React.FC = () => {
             const toolbarTop = screenY + screenHeight + 16;
             const centerX = screenX + (screenWidth / 2);
             return (
-                <div className="absolute bg-white rounded-2xl shadow-[0_4px_20px_rgb(0,0,0,0.08)] border border-gray-100 p-3 z-50 animate-in fade-in zoom-in-95 duration-200 -translate-x-1/2 w-[420px]" style={{ left: centerX, top: toolbarTop }} onMouseDown={(e) => e.stopPropagation()}>
-                    <textarea placeholder="描述你想要生成的视频..." className="w-full text-sm font-medium text-gray-700 placeholder:text-gray-400 bg-transparent border-none outline-none resize-none h-12 mb-2 p-1" value={el.genPrompt || ''} onChange={(e) => updateSelectedElement({ genPrompt: e.target.value })} onKeyDown={(e) => e.stopPropagation()} />
-                    <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                            <div className="relative">
-                                <button onClick={() => setShowModelPicker(!showModelPicker)} className="flex items-center gap-1.5 text-xs font-medium text-gray-600 hover:text-black transition"><Box size={14} /><span>{el.genModel || 'Veo 3.1 Fast'}</span><ChevronDown size={10} /></button>
-                                {showModelPicker && (
-                                    <div className="absolute bottom-full mb-2 left-0 w-40 bg-white rounded-xl shadow-xl border border-gray-100 p-1 z-50 grid grid-cols-1 gap-1">
-                                        {['Veo 3.1', 'Veo 3.1 Fast'].map(m => (<button key={m} onClick={() => { updateSelectedElement({ genModel: m as any }); setShowModelPicker(false); }} className="text-left px-2 py-1.5 hover:bg-gray-50 rounded-lg text-xs font-medium">{m}</button>))}
-                                    </div>
-                                )}
-                            </div>
+                <div className="absolute bg-white rounded-2xl shadow-[0_4px_20px_rgb(0,0,0,0.08)] border border-gray-100 z-50 animate-in fade-in zoom-in-95 duration-200 min-w-[420px]" style={{ left: 0, top: 0, transform: `translate(calc(${centerX}px - 50%), ${toolbarTop}px)`, willChange: 'transform' }} onMouseDown={(e) => e.stopPropagation()}>
+                    {/* Prompt textarea */}
+                    <div className="p-3 pb-0">
+                        <textarea placeholder="今天我们要创作什么" className="w-full text-sm text-gray-700 placeholder:text-gray-400 bg-transparent border-none outline-none resize-none h-16 p-1" value={el.genPrompt || ''} onChange={(e) => updateSelectedElement({ genPrompt: e.target.value })} onKeyDown={(e) => e.stopPropagation()} />
+                    </div>
 
-                            <div className="flex gap-1">
-                                <div className="relative group/tooltip">
-                                    <button className={`text-gray-400 hover:text-gray-600 transition flex items-center gap-1 text-[10px] p-1 rounded ${el.genStartFrame ? 'text-blue-500 bg-blue-50' : ''}`} onClick={() => document.getElementById(`start-frame-${el.id}`)?.click()}>
-                                        <ImageIcon size={14} /> Start
-                                    </button>
+                    {/* Collapsible Frame Upload Panel */}
+                    {showFramePanel && videoToolbarTab === 'frames' && (
+                        <div className="px-3 pb-2 animate-in slide-in-from-top-2 duration-200">
+                            <div className="flex items-center gap-3 py-2">
+                                {/* 首帧 Card */}
+                                <div className="relative group/startframe">
+                                    {el.genStartFrame ? (
+                                        <div className="w-14 h-14 rounded-xl overflow-hidden border border-gray-200 relative cursor-pointer" onClick={() => document.getElementById(`start-frame-${el.id}`)?.click()}>
+                                            <img src={el.genStartFrame} className="w-full h-full object-cover" />
+                                            <span className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[9px] text-center py-0.5 font-medium">首帧</span>
+                                            <div className="absolute -top-1.5 -right-1.5 bg-gray-600 text-white rounded-full p-0.5 cursor-pointer hover:bg-red-500 opacity-0 group-hover/startframe:opacity-100 transition z-10" onClick={(ev) => { ev.stopPropagation(); updateSelectedElement({ genStartFrame: undefined }); }}><X size={8} /></div>
+                                        </div>
+                                    ) : (
+                                        <div onClick={() => document.getElementById(`start-frame-${el.id}`)?.click()} className="w-14 h-14 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition group/upload">
+                                            <Plus size={16} className="text-gray-400 group-hover/upload:text-blue-500 transition" />
+                                            <span className="text-[10px] text-gray-400 group-hover/upload:text-blue-500 mt-0.5">首帧</span>
+                                        </div>
+                                    )}
                                     <input type="file" id={`start-frame-${el.id}`} className="hidden" accept="image/*" onChange={(e) => handleVideoRefUpload(e, 'start')} />
                                 </div>
 
-                                <div className="relative group/tooltip">
-                                    <button className={`text-gray-400 hover:text-gray-600 transition flex items-center gap-1 text-[10px] p-1 rounded ${el.genEndFrame ? 'text-blue-500 bg-blue-50' : ''}`} onClick={() => document.getElementById(`end-frame-${el.id}`)?.click()}>
-                                        <ImageIcon size={14} /> End
-                                    </button>
+                                {/* 尾帧 Card */}
+                                <div className="relative group/endframe">
+                                    {el.genEndFrame ? (
+                                        <div className="w-14 h-14 rounded-xl overflow-hidden border border-gray-200 relative cursor-pointer" onClick={() => document.getElementById(`end-frame-${el.id}`)?.click()}>
+                                            <img src={el.genEndFrame} className="w-full h-full object-cover" />
+                                            <span className="absolute bottom-0 left-0 right-0 bg-black/50 text-white text-[9px] text-center py-0.5 font-medium">尾帧</span>
+                                            <div className="absolute -top-1.5 -right-1.5 bg-gray-600 text-white rounded-full p-0.5 cursor-pointer hover:bg-red-500 opacity-0 group-hover/endframe:opacity-100 transition z-10" onClick={(ev) => { ev.stopPropagation(); updateSelectedElement({ genEndFrame: undefined }); }}><X size={8} /></div>
+                                        </div>
+                                    ) : (
+                                        <div onClick={() => document.getElementById(`end-frame-${el.id}`)?.click()} className="w-14 h-14 border-2 border-dashed border-gray-300 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition group/upload">
+                                            <Plus size={16} className="text-gray-400 group-hover/upload:text-blue-500 transition" />
+                                            <span className="text-[10px] text-gray-400 group-hover/upload:text-blue-500 mt-0.5">尾帧</span>
+                                        </div>
+                                    )}
                                     <input type="file" id={`end-frame-${el.id}`} className="hidden" accept="image/*" onChange={(e) => handleVideoRefUpload(e, 'end')} />
                                 </div>
                             </div>
                         </div>
+                    )}
+
+                    {/* Bottom Controls Bar */}
+                    <div className="flex items-center justify-between px-3 py-2 border-t border-gray-100">
+                        {/* Left: Tabs */}
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={() => { setVideoToolbarTab('frames'); setShowFramePanel(videoToolbarTab === 'frames' ? !showFramePanel : true); }}
+                                className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition border ${videoToolbarTab === 'frames' && showFramePanel ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}
+                                tabIndex={-1}
+                            >
+                                首尾帧
+                            </button>
+                            <button
+                                onClick={() => { setVideoToolbarTab('motion'); setShowFramePanel(false); }}
+                                className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 transition border ${videoToolbarTab === 'motion' ? 'bg-gray-900 text-white border-gray-900' : 'border-gray-200 text-gray-700 hover:bg-gray-50'}`}
+                                tabIndex={-1}
+                            >
+                                动作控制
+                            </button>
+                        </div>
+
+                        {/* Right: Model, Ratio, Generate */}
                         <div className="flex items-center gap-3">
                             <div className="relative">
-                                <button onClick={(e) => { e.stopPropagation(); setShowRatioPicker(!showRatioPicker); setShowResPicker(false); setShowModelPicker(false); }} className="text-xs font-medium text-gray-500 hover:text-black flex items-center gap-0.5">{el.genAspectRatio || '16:9'} <ChevronDown size={10} /></button>
+                                <button onClick={() => setShowModelPicker(!showModelPicker)} className="flex items-center gap-1.5 text-xs font-medium text-gray-700 hover:text-black transition" tabIndex={-1}>
+                                    <Box size={14} /><span>{el.genModel || 'Kling 2.6'}</span><ChevronDown size={10} />
+                                </button>
+                                {showModelPicker && (
+                                    <div className="absolute bottom-full mb-2 right-0 w-40 bg-white rounded-xl shadow-xl border border-gray-100 p-1 z-50 grid grid-cols-1 gap-1">
+                                        {['Veo 3.1 Fast', 'Kling 2.6', 'Sora'].map(m => (<button key={m} onClick={() => { updateSelectedElement({ genModel: m as any }); setShowModelPicker(false); }} className="text-left px-2 py-1.5 hover:bg-gray-50 rounded-lg text-xs font-medium">{m}</button>))}
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="relative flex items-center">
+                                <button onClick={(e) => { e.stopPropagation(); setShowRatioPicker(!showRatioPicker); setShowResPicker(false); setShowModelPicker(false); }} className="text-xs font-medium text-gray-500 hover:text-black flex items-center gap-0.5" tabIndex={-1}>
+                                    {el.genAspectRatio || '16:9'} · {el.genDuration || '5s'} <ChevronDown size={10} />
+                                </button>
                                 {showRatioPicker && (
                                     <div className="absolute bottom-full mb-2 right-0 w-32 bg-white rounded-xl shadow-xl border border-gray-100 p-1 z-50 flex flex-col gap-0.5">
                                         <div className="px-3 py-2 text-xs text-gray-400 font-medium">比例</div>
@@ -2647,34 +2692,24 @@ const Workspace: React.FC = () => {
                                     </div>
                                 )}
                             </div>
-                            <button onClick={() => handleGenVideo(el.id)} disabled={!el.genPrompt || el.isGenerating} className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${!el.genPrompt || el.isGenerating ? 'bg-gray-200 text-gray-400' : 'bg-gray-300 hover:bg-black text-white'}`}>{el.isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} fill="currentColor" />}</button>
+
+                            <button
+                                onClick={() => handleGenVideo(el.id)}
+                                disabled={!el.genPrompt || el.isGenerating}
+                                className={`w-8 h-8 rounded-lg flex items-center justify-center transition-all ${!el.genPrompt || el.isGenerating ? 'bg-gray-200 text-gray-400' : 'bg-gray-300 hover:bg-black text-white'}`}
+                                tabIndex={-1}
+                            >
+                                {el.isGenerating ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} fill="currentColor" />}
+                            </button>
                         </div>
                     </div>
-                    {(el.genStartFrame || el.genEndFrame) && (
-                        <div className="flex gap-2 mt-2 pt-2 border-t border-gray-100 overflow-x-auto no-scrollbar">
-                            {el.genStartFrame && (
-                                <div className="relative group/frame shrink-0">
-                                    <img src={el.genStartFrame} className="h-10 rounded border border-gray-200" title="Start Frame" />
-                                    <div className="absolute -top-1 -right-1 bg-black text-white rounded-full p-0.5 cursor-pointer hover:bg-red-500" onClick={() => updateSelectedElement({ genStartFrame: undefined })}><X size={8} /></div>
-                                    <span className="absolute bottom-0 left-0 bg-black/50 text-white text-[8px] px-1 rounded-bl-sm rounded-tr-sm">Start</span>
-                                </div>
-                            )}
-                            {el.genEndFrame && (
-                                <div className="relative group/frame shrink-0">
-                                    <img src={el.genEndFrame} className="h-10 rounded border border-gray-200" title="End Frame" />
-                                    <div className="absolute -top-1 -right-1 bg-black text-white rounded-full p-0.5 cursor-pointer hover:bg-red-500" onClick={() => updateSelectedElement({ genEndFrame: undefined })}><X size={8} /></div>
-                                    <span className="absolute bottom-0 left-0 bg-black/50 text-white text-[8px] px-1 rounded-bl-sm rounded-tr-sm">End</span>
-                                </div>
-                            )}
-                        </div>
-                    )}
                 </div>
             );
         }
     };
 
     return (
-        <div className="flex h-screen w-screen overflow-hidden bg-[#F9FAFB] font-sans">
+        <div className="flex h-screen w-screen overflow-hidden bg-[#E5E7EB] font-sans">
             {renderContextMenu()}
             {previewUrl && (
                 <div className="fixed inset-0 z-[100] bg-black/80 flex items-center justify-center p-10 cursor-pointer backdrop-blur-sm animate-in fade-in duration-200" onClick={() => setPreviewUrl(null)}>
@@ -2797,35 +2832,35 @@ const Workspace: React.FC = () => {
                                                     .filter(c => !historySearch || c.title.toLowerCase().includes(historySearch.toLowerCase()))
                                                     .sort((a, b) => b.updatedAt - a.updatedAt)
                                                     .map(conversation => (
-                                                    <div
-                                                        key={conversation.id}
-                                                        onClick={() => {
-                                                            setActiveConversationId(conversation.id);
-                                                            localStorage.setItem(ACTIVE_CONVERSATION_KEY, conversation.id);
-                                                            setMessages(conversation.messages);
-                                                            setShowHistoryPopover(false);
-                                                        }}
-                                                        className={`p-2 rounded-lg cursor-pointer transition flex items-center gap-2 ${activeConversationId === conversation.id ? 'bg-blue-50 border border-blue-100' : 'hover:bg-gray-50'}`}
-                                                    >
-                                                        <MessageSquare size={13} className="text-gray-400 flex-shrink-0" />
-                                                        <div className="flex-1 min-w-0">
-                                                            <div className="text-xs font-medium text-gray-700 truncate">{conversation.title}</div>
-                                                            <div className="text-[10px] text-gray-400 mt-0.5">{new Date(conversation.updatedAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
-                                                        </div>
-                                                        <button
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                const updated = conversations.filter(c => c.id !== conversation.id);
-                                                                setConversations(updated);
-                                                                saveConversations(updated);
-                                                                if (activeConversationId === conversation.id) { setActiveConversationId(''); setMessages([]); }
+                                                        <div
+                                                            key={conversation.id}
+                                                            onClick={() => {
+                                                                setActiveConversationId(conversation.id);
+                                                                localStorage.setItem(ACTIVE_CONVERSATION_KEY, conversation.id);
+                                                                setMessages(conversation.messages);
+                                                                setShowHistoryPopover(false);
                                                             }}
-                                                            className="text-gray-300 hover:text-red-400 transition flex-shrink-0"
+                                                            className={`p-2 rounded-lg cursor-pointer transition flex items-center gap-2 ${activeConversationId === conversation.id ? 'bg-blue-50 border border-blue-100' : 'hover:bg-gray-50'}`}
                                                         >
-                                                            <X size={12} />
-                                                        </button>
-                                                    </div>
-                                                ))}
+                                                            <MessageSquare size={13} className="text-gray-400 flex-shrink-0" />
+                                                            <div className="flex-1 min-w-0">
+                                                                <div className="text-xs font-medium text-gray-700 truncate">{conversation.title}</div>
+                                                                <div className="text-[10px] text-gray-400 mt-0.5">{new Date(conversation.updatedAt).toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</div>
+                                                            </div>
+                                                            <button
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    const updated = conversations.filter(c => c.id !== conversation.id);
+                                                                    setConversations(updated);
+                                                                    saveConversations(updated);
+                                                                    if (activeConversationId === conversation.id) { setActiveConversationId(''); setMessages([]); }
+                                                                }}
+                                                                className="text-gray-300 hover:text-red-400 transition flex-shrink-0"
+                                                            >
+                                                                <X size={12} />
+                                                            </button>
+                                                        </div>
+                                                    ))}
                                                 {conversations.length === 0 && (
                                                     <div className="text-center text-xs text-gray-400 py-6">暂无历史对话</div>
                                                 )}
@@ -3033,22 +3068,22 @@ const Workspace: React.FC = () => {
                                                             {msg.agentData.adjustments.map((adj, i) => (
                                                                 <button
                                                                     key={i}
-                                                                 onClick={() => handleSend(adj)}
+                                                                    onClick={() => handleSend(adj)}
                                                                     className="px-3 py-1.5 text-xs font-medium text-gray-600 bg-gray-50 hover:bg-gray-100 border border-gray-200 rounded-full transition hover:text-gray-900"
                                                                 >
                                                                     {adj}
                                                                 </button>
                                                             ))}
-                                                    </div>
+                                                        </div>
                                                     )}
 
                                                     {/* Feedback buttons */}
                                                     <div className="flex items-center gap-2 pt-1">
                                                         <button className="p-1.5 text-gray-300 hover:text-gray-600 transition rounded-lg hover:bg-gray-50">
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 10v12"/><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2h0a3.13 3.13 0 0 1 3 3.88Z"/></svg>
+                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 10v12" /><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2h0a3.13 3.13 0 0 1 3 3.88Z" /></svg>
                                                         </button>
                                                         <button className="p-1.5 text-gray-300 hover:text-gray-600 transition rounded-lg hover:bg-gray-50">
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 14V2"/><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22h0a3.13 3.13 0 0 1-3-3.88Z"/></svg>
+                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 14V2" /><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22h0a3.13 3.13 0 0 1-3-3.88Z" /></svg>
                                                         </button>
                                                         <button
                                                             onClick={() => navigator.clipboard.writeText(msg.text)}
@@ -3160,12 +3195,11 @@ const Workspace: React.FC = () => {
                                         el?.focus();
                                     }
                                 }}>
-                                    {/* Inline flow: chips and text truly inline (Lovart style) */}
-                                    <style>{`.ce-placeholder:empty::before{content:attr(data-placeholder);color:#9CA3AF;pointer-events:none}`}</style>
-                                    <div className="input-flow-container" style={{ lineHeight: '28px', wordBreak: 'break-word' }}>
+                                    {/* Inline flow: chips and text in a single line */}
+                                    <div className="input-flow-container flex flex-wrap items-center gap-1" style={{ minHeight: '28px', wordBreak: 'break-word', lineHeight: '28px' }}>
                                         {inputBlocks.map((block, blockIndex) => {
                                             if (block.type === 'file' && block.file) {
-                                                const file = block.file;
+                                                const file = block.file!;
                                                 const markerId = (file as any).markerId;
                                                 const isSelected = selectedChipId === block.id;
                                                 const isHovered = hoveredChipId === block.id;
@@ -3180,7 +3214,6 @@ const Workspace: React.FC = () => {
                                                 } | undefined;
 
                                                 if (markerId) {
-                                                    // 标记区域 chip
                                                     return (
                                                         <motion.div
                                                             key={block.id}
@@ -3188,22 +3221,21 @@ const Workspace: React.FC = () => {
                                                             initial={{ scale: 0, opacity: 0 }}
                                                             animate={{ scale: 1, opacity: 1 }}
                                                             transition={{ type: 'spring', stiffness: 400, damping: 20 }}
-                                                            style={{ display: 'inline-flex', verticalAlign: 'middle' }}
-                                                            className={`items-center gap-1.5 rounded-xl pl-1.5 pr-2 py-1 cursor-default relative group select-none h-9 transition-all ${isSelected
-                                                                    ? 'bg-blue-100 ring-2 ring-blue-500'
-                                                                    : 'bg-[#F3F4F6] hover:bg-[#E8E9EC]'
+                                                            className={`inline-flex items-center gap-1.5 rounded-md pl-1 pr-1.5 cursor-default relative group select-none h-6 transition-all border ${isSelected
+                                                                ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-500'
+                                                                : 'bg-gray-50 border-gray-100 hover:bg-gray-100'
                                                                 }`}
                                                             onClick={(e) => { e.stopPropagation(); setSelectedChipId(isSelected ? null : block.id); }}
                                                             onMouseEnter={() => setHoveredChipId(block.id)}
                                                             onMouseLeave={() => setHoveredChipId(null)}
                                                         >
-                                                            <div className="w-7 h-7 rounded-lg overflow-hidden border border-gray-200 flex-shrink-0">
+                                                            <div className="w-5 h-5 rounded-sm overflow-hidden border border-gray-200 flex-shrink-0">
                                                                 <img src={URL.createObjectURL(file)} className="w-full h-full object-cover" />
                                                             </div>
-                                                            <div className="w-5 h-5 bg-[#3B82F6] rounded-md flex items-center justify-center text-white text-[10px] font-bold shadow-sm flex-shrink-0">
+                                                            <div className="w-4 h-4 bg-[#3B82F6] rounded-sm flex items-center justify-center text-white text-[9px] font-bold shadow-sm flex-shrink-0">
                                                                 {markerId}
                                                             </div>
-                                                            <span className="text-xs text-gray-700 font-medium max-w-[100px] truncate">{(file as any).markerName || '区域'}</span>
+                                                            <span className="text-[11px] text-gray-700 font-medium max-w-[80px] truncate">{(file as any).markerName || '区域'}</span>
                                                             <ChevronDown size={12} className="text-gray-400" />
                                                             <button onClick={(e) => { e.stopPropagation(); removeInputBlock(block.id); setSelectedChipId(null); }} className="absolute -top-1.5 -right-1.5 bg-gray-500 text-white rounded-full p-0.5 opacity-0 group-hover:opacity-100 transition shadow-sm z-20 hover:bg-gray-700"><X size={8} /></button>
 
@@ -3227,7 +3259,7 @@ const Workspace: React.FC = () => {
                                                                                     <img src={markerInfo.fullImageUrl} className="w-full h-full object-cover" />
                                                                                 </motion.div>
                                                                                 {markerInfo.x !== undefined && markerInfo.imageWidth && (
-                                                                         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3, delay: 0.9 }} className="absolute inset-0 pointer-events-none">
+                                                                                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.3, delay: 0.9 }} className="absolute inset-0 pointer-events-none">
                                                                                         <motion.div initial={{ scale: 1 }} animate={{ scale: 2.5 }} transition={zoomTransition} className="absolute inset-0" style={{ transformOrigin: zoomOrigin }}>
                                                                                             <div className="absolute border-2 border-blue-500 rounded-sm" style={{ left: `${(markerInfo.x / markerInfo.imageWidth) * 100}%`, top: `${(markerInfo.y! / markerInfo.imageHeight!) * 100}%`, width: `${(markerInfo.width! / markerInfo.imageWidth) * 100}%`, height: `${(markerInfo.height! / markerInfo.imageHeight!) * 100}%` }}>
                                                                                                 <div className="absolute -top-2 -right-2 w-5 h-5 bg-blue-500 rounded-full flex items-center justify-center text-white text-[10px] font-bold shadow-lg">{markerId}</div>
@@ -3245,7 +3277,7 @@ const Workspace: React.FC = () => {
                                                         </motion.div>
                                                     );
                                                 } else {
-                                                    // 普通文件 chip - inline style
+                                                    // Regular file chip
                                                     const isCanvasAuto = (file as any)._canvasAutoInsert;
                                                     const chipLabel = isCanvasAuto
                                                         ? `图片${inputBlocks.filter(b => b.type === 'file' && (b.file as any)?._canvasAutoInsert).indexOf(block) + 1}`
@@ -3253,24 +3285,22 @@ const Workspace: React.FC = () => {
                                                     return (
                                                         <div
                                                             key={block.id}
-                                                            style={{ display: 'inline-flex', verticalAlign: 'middle' }}
-                                                            className={`items-center gap-1.5 rounded-xl pl-1.5 pr-2 py-1 select-none relative group h-9 cursor-default transition-all border ${isSelected
-                                                                    ? 'bg-blue-50 border-blue-200'
-                                                                    : isInputFocused ? 'bg-gray-100 border-gray-200' : 'bg-gray-50 border-gray-100'
+                                                            className={`inline-flex flex-shrink-0 items-center gap-1 rounded-md pl-1 pr-1.5 select-none relative group h-6 cursor-default transition-all border ${isSelected
+                                                                ? 'bg-blue-50 border-blue-200'
+                                                                : isInputFocused ? 'bg-gray-100 border-gray-200' : 'bg-gray-50 border-gray-100'
                                                                 }`}
                                                             onClick={(e) => { e.stopPropagation(); setSelectedChipId(isSelected ? null : block.id); }}
                                                         >
-                                                            <div className="w-7 h-7 rounded-lg overflow-hidden flex-shrink-0">
-                                                                {file.type.startsWith('image/') ? <img src={URL.createObjectURL(file)} className="w-full h-full object-cover" /> : <FileText size={14} className="text-gray-500" />}
+                                                            <div className="w-5 h-5 rounded-sm overflow-hidden flex-shrink-0">
+                                                                {file.type.startsWith('image/') ? <img src={URL.createObjectURL(file)} className="w-full h-full object-cover" /> : <FileText size={12} className="text-gray-500" />}
                                                             </div>
-                                                            <span className="text-xs text-gray-600 font-medium max-w-[120px] truncate">{chipLabel}</span>
+                                                            <span className="text-[11px] text-gray-600 font-medium max-w-[100px] truncate">{chipLabel}</span>
                                                             <button onClick={(e) => { e.stopPropagation(); removeInputBlock(block.id); setSelectedChipId(null); }} className="w-4 h-4 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-700 hover:bg-black/10 transition opacity-0 group-hover:opacity-100"><X size={10} /></button>
                                                         </div>
                                                     );
                                                 }
                                             }
 
-                                            // 文本 block - 渲染为 inline input/textarea
                                             if (block.type === 'text') {
                                                 const textBlocks = inputBlocks.filter(b => b.type === 'text');
                                                 const isLastTextBlock = textBlocks[textBlocks.length - 1]?.id === block.id;
@@ -3286,19 +3316,19 @@ const Workspace: React.FC = () => {
                                                         id={`input-block-${block.id}`}
                                                         contentEditable
                                                         suppressContentEditableWarning
-                                                        className="ce-placeholder outline-none text-sm text-gray-800"
+                                                        className="ce-placeholder outline-none text-sm text-gray-800 inline"
                                                         data-placeholder={placeholder}
                                                         style={{
                                                             display: 'inline',
                                                             lineHeight: '28px',
                                                             whiteSpace: 'pre-wrap',
                                                             wordBreak: 'break-word',
-                                                            caretColor: '#3B82F6',
-                                                            minWidth: isLastTextBlock ? '1px' : undefined,
+                                                            caretColor: '#111827',
+                                                            minWidth: '2px',
+                                                            flex: isLastTextBlock ? '1 1 auto' : undefined,
                                                         }}
                                                         ref={el => {
                                                             if (el) {
-                                                                // 仅在非聚焦状态下同步文本（防止光标跳动）
                                                                 if (document.activeElement !== el && el.textContent !== (block.text || '')) {
                                                                     el.textContent = block.text || '';
                                                                 }
@@ -3315,86 +3345,118 @@ const Workspace: React.FC = () => {
                                                             if (el) setSelectionIndex(getCECursorPos(el));
                                                         }}
                                                         onKeyDown={(e) => {
-                                                            const myIndex = inputBlocks.findIndex(b => b.id === block.id);
-                                                            const el = e.currentTarget;
-                                                            const cursorPos = getCECursorPos(el);
-                                                            const textLen = (el.textContent || '').length;
-
-                                                            if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
-                                                                setSelectedChipId(null);
+                                                            if (e.key === 'Enter' && !e.shiftKey) {
+                                                                e.preventDefault();
+                                                                handleSend();
+                                                                return;
                                                             }
 
-                                                            if (e.key === 'ArrowLeft' && cursorPos === 0) {
-                                                                const prevFileIndex = inputBlocks.slice(0, myIndex).reverse().findIndex(b => b.type === 'file');
-                                                                if (prevFileIndex !== -1) {
-                                                                    const actualIndex = myIndex - 1 - prevFileIndex;
-                                                                    const prevFile = inputBlocks[actualIndex];
-                                                                    if (selectedChipId === prevFile.id) {
-                                                                        for (let j = actualIndex - 1; j >= 0; j--) {
-                                                                            if (inputBlocks[j].type === 'text') {
-                                                                                e.preventDefault();
-                                                                                setSelectedChipId(null);
-                                                                                const prevEl = document.getElementById(`input-block-${inputBlocks[j].id}`);
-                                                                                if (prevEl) setCECursorPos(prevEl, (prevEl.textContent || '').length);
-                                                                                break;
-                                                                            }
+                                                            const thisIdx = inputBlocks.findIndex(b => b.id === block.id);
+
+                                                            // === When a chip is currently selected ===
+                                                            if (selectedChipId) {
+                                                                const chipIdx = inputBlocks.findIndex(b => b.id === selectedChipId);
+                                                                if (e.key === 'ArrowLeft') {
+                                                                    e.preventDefault();
+                                                                    // Move to the text block BEFORE the selected chip
+                                                                    if (chipIdx > 0) {
+                                                                        const prevBlock = inputBlocks[chipIdx - 1];
+                                                                        if (prevBlock.type === 'text') {
+                                                                            setSelectedChipId(null);
+                                                                            setActiveBlockId(prevBlock.id);
+                                                                            // Defer focus to after React re-render
+                                                                            setTimeout(() => {
+                                                                                const el = document.getElementById(`input-block-${prevBlock.id}`);
+                                                                                if (el) {
+                                                                                    el.focus();
+                                                                                    setCECursorPos(el, (prevBlock.text || '').length);
+                                                                                }
+                                                                            }, 0);
+                                                                        } else if (prevBlock.type === 'file') {
+                                                                            setSelectedChipId(prevBlock.id);
                                                                         }
                                                                     } else {
-                                                                        e.preventDefault();
-                                                                        setSelectedChipId(prevFile.id);
+                                                                        setSelectedChipId(null);
                                                                     }
+                                                                    return;
                                                                 }
-                                                            }
-
-                                                            if (e.key === 'ArrowRight' && cursorPos === textLen) {
-                                                                const nextFileIndex = inputBlocks.slice(myIndex + 1).findIndex(b => b.type === 'file');
-                                                                if (nextFileIndex !== -1) {
-                                                                    const actualIndex = myIndex + 1 + nextFileIndex;
-                                                                    const nextFile = inputBlocks[actualIndex];
-                                                                    if (selectedChipId === nextFile.id) {
-                                                                        for (let j = actualIndex + 1; j < inputBlocks.length; j++) {
-                                                                            if (inputBlocks[j].type === 'text') {
-                                                                                e.preventDefault();
-                                                                                setSelectedChipId(null);
-                                                                                const nextEl = document.getElementById(`input-block-${inputBlocks[j].id}`);
-                                                                                if (nextEl) setCECursorPos(nextEl, 0);
-                                                                                break;
-                                                                            }
+                                                                if (e.key === 'ArrowRight') {
+                                                                    e.preventDefault();
+                                                                    // Move to the text block AFTER the selected chip
+                                                                    if (chipIdx < inputBlocks.length - 1) {
+                                                                        const nextBlock = inputBlocks[chipIdx + 1];
+                                                                        if (nextBlock.type === 'text') {
+                                                                            setSelectedChipId(null);
+                                                                            setActiveBlockId(nextBlock.id);
+                                                                            setTimeout(() => {
+                                                                                const el = document.getElementById(`input-block-${nextBlock.id}`);
+                                                                                if (el) {
+                                                                                    el.focus();
+                                                                                    setCECursorPos(el, 0);
+                                                                                }
+                                                                            }, 0);
+                                                                        } else if (nextBlock.type === 'file') {
+                                                                            setSelectedChipId(nextBlock.id);
                                                                         }
                                                                     } else {
-                                                                        e.preventDefault();
-                                                                        setSelectedChipId(nextFile.id);
+                                                                        setSelectedChipId(null);
                                                                     }
+                                                                    return;
                                                                 }
-                                                            }
-
-                                                            if (e.key === 'Backspace') {
-                                                                if (selectedChipId) {
+                                                                if (e.key === 'Backspace' || e.key === 'Delete') {
                                                                     e.preventDefault();
                                                                     removeInputBlock(selectedChipId);
                                                                     setSelectedChipId(null);
-                                                                } else if (!el.textContent && myIndex > 0) {
-                                                                    const prevBlock = inputBlocks[myIndex - 1];
+                                                                    return;
+                                                                }
+                                                                if (e.key === 'Escape') {
+                                                                    setSelectedChipId(null);
+                                                                    return;
+                                                                }
+                                                                // Any printable key — deselect chip, let text input proceed
+                                                                if (e.key.length === 1 && !e.ctrlKey && !e.metaKey) {
+                                                                    setSelectedChipId(null);
+                                                                }
+                                                                return;
+                                                            }
+
+                                                            // === Normal mode (no chip selected) ===
+                                                            if (e.key === 'ArrowLeft') {
+                                                                const curEl = e.currentTarget;
+                                                                const pos = getCECursorPos(curEl);
+                                                                if (pos === 0 && thisIdx > 0) {
+                                                                    const prevBlock = inputBlocks[thisIdx - 1];
                                                                     if (prevBlock.type === 'file') {
                                                                         e.preventDefault();
                                                                         setSelectedChipId(prevBlock.id);
                                                                     }
                                                                 }
                                                             }
-
-                                                            if (e.key === 'Delete' && selectedChipId) {
-                                                                e.preventDefault();
-                                                                removeInputBlock(selectedChipId);
-                                                                setSelectedChipId(null);
+                                                            if (e.key === 'ArrowRight') {
+                                                                const curEl = e.currentTarget;
+                                                                const pos = getCECursorPos(curEl);
+                                                                const textLen = (block.text || '').length;
+                                                                if (pos >= textLen && thisIdx < inputBlocks.length - 1) {
+                                                                    const nextBlock = inputBlocks[thisIdx + 1];
+                                                                    if (nextBlock.type === 'file') {
+                                                                        e.preventDefault();
+                                                                        setSelectedChipId(nextBlock.id);
+                                                                    }
+                                                                }
                                                             }
-
+                                                            if (e.key === 'Backspace') {
+                                                                const curEl = e.currentTarget;
+                                                                const pos = getCECursorPos(curEl);
+                                                                if (pos === 0 && thisIdx > 0) {
+                                                                    const prevBlock = inputBlocks[thisIdx - 1];
+                                                                    if (prevBlock.type === 'file') {
+                                                                        e.preventDefault();
+                                                                        setSelectedChipId(prevBlock.id);
+                                                                    }
+                                                                }
+                                                            }
                                                             if (e.key === 'Escape') {
                                                                 setSelectedChipId(null);
-                                                            }
-
-                                                            if (e.key === 'Enter' && !e.shiftKey) {
-                                                                e.preventDefault();
-                                                                handleSend();
                                                             }
                                                         }}
                                                         onPaste={(e) => {
@@ -3402,7 +3464,6 @@ const Workspace: React.FC = () => {
                                                                 e.preventDefault();
                                                                 Array.from(e.clipboardData.files).forEach(f => insertInputFile(f as File));
                                                             } else {
-                                                                // 强制纯文本粘贴，防止富文本破坏结构
                                                                 e.preventDefault();
                                                                 const text = e.clipboardData.getData('text/plain');
                                                                 document.execCommand('insertText', false, text);
@@ -3432,8 +3493,8 @@ const Workspace: React.FC = () => {
                                             <button
                                                 onClick={() => setShowModeSelector(!showModeSelector)}
                                                 className={`h-8 px-3 rounded-full border flex items-center gap-1.5 text-xs font-medium transition ${creationMode === 'agent' ? 'bg-blue-50 border-[#3B82F6] text-[#3B82F6]' :
-                                                        creationMode === 'image' ? 'bg-blue-50 border-[#3B82F6] text-[#3B82F6]' :
-                                                            'bg-purple-50 border-purple-500 text-purple-600'
+                                                    creationMode === 'image' ? 'bg-blue-50 border-[#3B82F6] text-[#3B82F6]' :
+                                                        'bg-purple-50 border-purple-500 text-purple-600'
                                                     }`}
                                             >
                                                 {creationMode === 'agent' && <><Sparkles size={12} /> Agent</>}
@@ -3594,7 +3655,7 @@ const Workspace: React.FC = () => {
                                                         <button onClick={() => setShowModelPreference(!showModelPreference)} className={`w-8 h-8 rounded-full border flex items-center justify-center transition ${showModelPreference ? 'bg-blue-500 border-blue-500 text-white' : 'border-gray-200 text-gray-400 hover:text-gray-700 hover:bg-black/5 bg-white'}`}><Box size={16} strokeWidth={2} /></button>
                                                         {!showModelPreference && (
                                                             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 text-white text-xs rounded-lg whitespace-nowrap opacity-0 group-hover/model:opacity-100 transition pointer-events-none z-50 shadow-lg">
-                                                             <div className="font-medium">模型偏好</div>
+                                                                <div className="font-medium">模型偏好</div>
                                                                 <div className="text-gray-400 text-[10px]">{autoModelSelect ? '自动' : preferredImageModel}</div>
                                                                 <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-2 h-2 bg-gray-900 rotate-45"></div>
                                                             </div>
@@ -3611,7 +3672,7 @@ const Workspace: React.FC = () => {
                                                                         <div
                                                                             onClick={() => setAutoModelSelect(!autoModelSelect)}
                                                                             className={`w-9 h-5 rounded-full transition-colors relative cursor-pointer ${autoModelSelect ? 'bg-black' : 'bg-gray-300'}`}
-                                                              >
+                                                                        >
                                                                             <div className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform ${autoModelSelect ? 'translate-x-4' : 'translate-x-0.5'}`} />
                                                                         </div>
                                                                     </div>
@@ -3711,7 +3772,7 @@ const Workspace: React.FC = () => {
                     </div>
                 </div>
 
-                <div ref={containerRef} className="flex-1 overflow-hidden relative bg-[#F9FAFB] w-full h-full select-none" onContextMenu={handleContextMenu} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} style={{ cursor: (activeTool === 'hand' || isPanning || isSpacePressed) ? (isPanning ? 'grabbing' : 'grab') : (activeTool === 'mark' ? 'crosshair' : (activeTool === 'select' ? 'default' : 'grab')), WebkitUserSelect: 'none' }}>
+                <div ref={containerRef} className="flex-1 overflow-hidden relative bg-[#E5E7EB] w-full h-full select-none" onContextMenu={handleContextMenu} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} style={{ cursor: (activeTool === 'hand' || isPanning || isSpacePressed) ? (isPanning ? 'grabbing' : 'grab') : (activeTool === 'mark' ? 'crosshair' : (activeTool === 'select' ? 'default' : 'grab')), WebkitUserSelect: 'none' }}>
                     {renderToolbar()}
                     {/* 框选矩形 */}
                     {isMarqueeSelecting && (
@@ -3726,7 +3787,7 @@ const Workspace: React.FC = () => {
                     {renderShapeToolbar()}
                     {renderImageToolbar()}
                     {renderGenVideoToolbar()}
-                    <div ref={canvasLayerRef} className="absolute top-0 left-0 w-0 h-0 overflow-visible" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom / 100})`, transformOrigin: '0 0' }}>
+                    <div ref={canvasLayerRef} className="absolute top-0 left-0 w-0 h-0 overflow-visible" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom / 100})`, transformOrigin: '0 0', willChange: 'transform' }}>
                         {elements.map((el) => {
                             const isSelected = selectedElementId === el.id || selectedElementIds.includes(el.id);
                             return (
@@ -3768,7 +3829,7 @@ const Workspace: React.FC = () => {
                                                                 }}
                                                             >
                                                                 <ImageIcon size={12} className="opacity-80" />
-                                                                <span>{el.id.includes('unnamed') ? 'unnamed' : 'Image'}</span>
+                                                                <span>{el.id.includes('unnamed') ? 'unnamed' : '图像'}</span>
                                                             </div>
 
                                                             {/* Right: Dimensions */}
@@ -3785,7 +3846,18 @@ const Workspace: React.FC = () => {
                                                 </>
                                             ) : (
                                                 <>
-                                                    <div className="flex items-center justify-between px-3 py-2 text-xs text-gray-500 border-b border-blue-100/50 whitespace-nowrap"><div className="flex items-center gap-2 font-medium"> <ImageIcon size={12} /> <span>Image...</span> </div><div className="font-mono opacity-70"> {Math.round(el.width)} × {Math.round(el.height)} </div></div>
+                                                    {/* Header bar — counter-scaled at low zoom for readability */}
+                                                    <div
+                                                        className="absolute top-0 left-0 right-0 flex items-center justify-between px-3 py-2 text-xs text-gray-500 border-b border-blue-100/50 whitespace-nowrap bg-white/90 backdrop-blur-sm z-10 pointer-events-none"
+                                                        style={zoom < 60 ? {
+                                                            transform: `scale(${Math.max(100 / zoom, 1)})`,
+                                                            transformOrigin: 'top left',
+                                                            width: `${Math.min(zoom, 100)}%`
+                                                        } : undefined}
+                                                    >
+                                                        <div className="flex items-center gap-2 font-medium"> <ImageIcon size={12} /> <span>图像生成器</span> </div>
+                                                        <div className="font-mono opacity-70"> {Math.round(el.width)} × {Math.round(el.height)} </div>
+                                                    </div>
                                                     <div className="flex-1 flex items-center justify-center relative group-hover:bg-blue-50/50 transition-colors">
                                                         {el.isGenerating ? (<div className="flex flex-col items-center gap-3"> <Loader2 size={32} className="animate-spin text-blue-500" /> <span className="text-xs text-blue-400 font-medium">Creating magic...</span> </div>) : (<div className="flex flex-col items-center gap-2 text-blue-200"> <ImageIcon size={48} strokeWidth={1.5} /> </div>)}
                                                         {el.genRefImage && !el.url && (<div className="absolute bottom-3 right-3 w-12 h-12 border-2 border-white shadow-sm rounded-lg overflow-hidden bg-gray-100"> <img src={el.genRefImage} className="w-full h-full object-cover opacity-80" /> </div>)}
@@ -3821,7 +3893,7 @@ const Workspace: React.FC = () => {
                                                                 }}
                                                             >
                                                                 <Video size={12} className="opacity-80" />
-                                                                <span>Video</span>
+                                                                <span>视频</span>
                                                             </div>
 
                                                             {/* Right: Dimensions */}
@@ -3838,7 +3910,18 @@ const Workspace: React.FC = () => {
                                                 </>
                                             ) : (
                                                 <>
-                                                    <div className="flex items-center justify-between px-3 py-2 text-xs text-gray-500 border-b border-blue-100/50 whitespace-nowrap"><div className="flex items-center gap-2 font-medium"> <Video size={12} /> <span>Video...</span> </div><div className="font-mono opacity-70"> {Math.round(el.width)} × {Math.round(el.height)} </div></div>
+                                                    {/* Header bar — counter-scaled at low zoom for readability */}
+                                                    <div
+                                                        className="absolute top-0 left-0 right-0 flex items-center justify-between px-3 py-2 text-xs text-gray-500 border-b border-blue-100/50 whitespace-nowrap bg-white/90 backdrop-blur-sm z-10 pointer-events-none"
+                                                        style={zoom < 60 ? {
+                                                            transform: `scale(${Math.max(100 / zoom, 1)})`,
+                                                            transformOrigin: 'top left',
+                                                            width: `${Math.min(zoom, 100)}%`
+                                                        } : undefined}
+                                                    >
+                                                        <div className="flex items-center gap-2 font-medium"> <Video size={12} /> <span>视频生成器</span> </div>
+                                                        <div className="font-mono opacity-70"> {Math.round(el.width)} × {Math.round(el.height)} </div>
+                                                    </div>
                                                     <div className="flex-1 flex items-center justify-center relative group-hover:bg-blue-50/50 transition-colors">
                                                         {el.isGenerating ? (<div className="flex flex-col items-center gap-3"> <Loader2 size={32} className="animate-spin text-blue-500" /> <span className="text-xs text-blue-400 font-medium">Creating magic...</span> </div>) : (<div className="flex flex-col items-center gap-2 text-blue-200"> <Film size={48} strokeWidth={1.5} /> </div>)}
                                                     </div>
