@@ -2248,7 +2248,7 @@ const Workspace: React.FC = () => {
 
 
 
-    const handleSend = async (textOverride?: string, attachmentsOverride?: File[], enableWebSearch: boolean = webEnabled) => {
+    const handleSend = async (textOverride?: string, attachmentsOverride?: File[], enableWebSearch: boolean = webEnabled, skillData?: { id: string; name: string; iconName: string }) => {
         // Construct message from blocks
         const derivedText = inputBlocks.filter(b => b.type === 'text').map(b => b.text).join(' ');
         const derivedFiles = inputBlocks.filter(b => b.type === 'file' && b.file).map(b => b.file!) as File[];
@@ -2296,7 +2296,8 @@ const Workspace: React.FC = () => {
                 id: Date.now().toString(), role: 'user',
                 text: textToSend,
                 timestamp: Date.now(),
-                attachments: attachmentUrls.length > 0 ? attachmentUrls : undefined
+                attachments: attachmentUrls.length > 0 ? attachmentUrls : undefined,
+                skillData: skillData
             };
             setMessages(prev => [...prev, newUserMsg]);
             setInputBlocks([{ id: `text-${Date.now()}`, type: 'text', text: '' }]);
@@ -3732,35 +3733,35 @@ const Workspace: React.FC = () => {
                                     {/* Skills Pills - Lovart Style */}
                                     <div className="flex flex-wrap gap-2.5">
                                         <button
-                                            onClick={() => handleSend("请帮我生成一套亚马逊产品Listing图，包含：白底主图、信息图（卖点标注）、场景图（生活方式）、细节特写图、尺寸对比图。每张图使用1:1比例，2000x2000px，专业电商摄影风格。请根据画布上的产品来生成。")}
+                                            onClick={() => handleSend("请帮我生成一套亚马逊产品Listing图，包含：白底主图、信息图（卖点标注）、场景图（生活方式）、细节特写图、尺寸对比图。每张图使用1:1比例，2000x2000px，专业电商摄影风格。请根据画布上的产品来生成。", undefined, webEnabled, { id: 'amazon-listing', name: '亚马逊产品套图', iconName: 'Store' })}
                                             className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900 hover:shadow-sm transition-all cursor-pointer"
                                         >
                                             <Store size={15} strokeWidth={1.8} />
                                             <span>亚马逊产品套图</span>
                                         </button>
                                         <button
-                                            onClick={() => handleSend("请帮我设计一套品牌Logo视觉系统，包含：主Logo设计（纯白背景，居中构图）、品牌色彩应用展示、Logo在不同场景的应用效果（名片、信封、网站）。使用1:1比例，PNG透明格式，现代简约风格。")}
+                                            onClick={() => handleSend("请帮我设计一套品牌Logo视觉系统，包含：主Logo设计（纯白背景，居中构图）、品牌色彩应用展示、Logo在不同场景的应用效果（名片、信封、网站）。使用1:1比例，PNG透明格式，现代简约风格。", undefined, webEnabled, { id: 'logo-design', name: 'Logo 与品牌', iconName: 'Layout' })}
                                             className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900 hover:shadow-sm transition-all cursor-pointer"
                                         >
                                             <Layout size={15} strokeWidth={1.8} />
                                             <span>Logo 与品牌</span>
                                         </button>
                                         <button
-                                            onClick={() => handleSend("请帮我生成一套社交媒体视觉素材，包含：Instagram方形帖子（1:1）、Story/Reel竖版封面（9:16）、横版Banner（16:9）。风格统一，色调一致，适合品牌社交媒体运营。请根据画布上的内容来设计。")}
+                                            onClick={() => handleSend("请帮我生成一套社交媒体视觉素材，包含：Instagram方形帖子（1:1）、Story/Reel竖版封面（9:16）、横版Banner（16:9）。风格统一，色调一致，适合品牌社交媒体运营。请根据画布上的内容来设计。", undefined, webEnabled, { id: 'social-media', name: '社交媒体', iconName: 'Globe' })}
                                             className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900 hover:shadow-sm transition-all cursor-pointer"
                                         >
                                             <Globe size={15} strokeWidth={1.8} />
                                             <span>社交媒体</span>
                                         </button>
                                         <button
-                                            onClick={() => handleSend("请帮我设计一套营销宣传册页面，包含：封面（产品Key Visual，高端商业摄影风格）、产品特性页（信息图表风格）、场景应用页（生活方式摄影）、品牌故事页。使用3:4竖版比例，专业出版印刷质量。")}
+                                            onClick={() => handleSend("请帮我设计一套营销宣传册页面，包含：封面（产品Key Visual，高端商业摄影风格）、产品特性页（信息图表风格）、场景应用页（生活方式摄影）、品牌故事页。使用3:4竖版比例，专业出版印刷质量。", undefined, webEnabled, { id: 'brochure', name: '营销宣传册', iconName: 'FileText' })}
                                             className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900 hover:shadow-sm transition-all cursor-pointer"
                                         >
                                             <FileText size={15} strokeWidth={1.8} />
                                             <span>营销宣传册</span>
                                         </button>
                                         <button
-                                            onClick={() => handleSend("请帮我制作产品九宫格分镜图")}
+                                            onClick={() => handleSend("请帮我制作产品九宫格分镜图", undefined, webEnabled, { id: 'cameron', name: '分镜故事板', iconName: 'Film' })}
                                             className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900 hover:shadow-sm transition-all cursor-pointer"
                                         >
                                             <Film size={15} strokeWidth={1.8} />
@@ -3778,16 +3779,40 @@ const Workspace: React.FC = () => {
                                             className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                                         >
                                             {msg.role === 'user' ? (
-                                                <div className="max-w-[85%] rounded-2xl rounded-tr-none px-4 py-3 text-sm shadow-sm bg-blue-600 text-white">
-                                                    <div className="whitespace-pre-wrap">{msg.text}</div>
-                                                    {msg.attachments && msg.attachments.length > 0 && (
-                                                        <div className="mt-2 grid grid-cols-2 gap-2">
-                                                            {msg.attachments.map((att, i) => (
-                                                                <img key={i} src={att} className="rounded-lg border border-white/20" />
-                                                            ))}
+                                                msg.skillData ? (
+                                                    <div className="max-w-[85%] rounded-xl px-3 py-2 text-sm shadow-sm bg-white border border-gray-200 text-gray-800 flex flex-col gap-2 relative overflow-hidden group transition">
+                                                        <div className="flex items-center gap-2">
+                                                            {msg.skillData.iconName === 'Store' && <Store size={15} className="text-gray-500" strokeWidth={2} />}
+                                                            {msg.skillData.iconName === 'Layout' && <Layout size={15} className="text-gray-500" strokeWidth={2} />}
+                                                            {msg.skillData.iconName === 'Globe' && <Globe size={15} className="text-gray-500" strokeWidth={2} />}
+                                                            {msg.skillData.iconName === 'FileText' && <FileText size={15} className="text-gray-500" strokeWidth={2} />}
+                                                            {msg.skillData.iconName === 'Film' && <Film size={15} className="text-gray-500" strokeWidth={2} />}
+                                                            <span className="font-semibold">{msg.skillData.name}</span>
                                                         </div>
-                                                    )}
-                                                </div>
+                                                        {/* Preview context */}
+                                                        {msg.attachments && msg.attachments.length > 0 && (
+                                                            <div className={`grid gap-1.5 ${msg.attachments.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                                                                {msg.attachments.map((att, i) => (
+                                                                    <img key={i} src={att} className="rounded-lg border border-gray-100 object-cover object-center w-full max-h-20" />
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                        <div className="text-xs text-gray-500 bg-gray-50 px-2 py-1.5 rounded-lg border border-gray-100 whitespace-nowrap overflow-hidden text-ellipsis max-w-full" title={msg.text}>
+                                                            {msg.text}
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div className="max-w-[85%] rounded-2xl rounded-tr-none px-4 py-3 text-sm shadow-sm bg-blue-600 text-white">
+                                                        <div className="whitespace-pre-wrap">{msg.text}</div>
+                                                        {msg.attachments && msg.attachments.length > 0 && (
+                                                            <div className="mt-2 grid grid-cols-2 gap-2">
+                                                                {msg.attachments.map((att, i) => (
+                                                                    <img key={i} src={att} className="rounded-lg border border-white/20" />
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )
                                             ) : msg.agentData ? (
                                                 /* Lovart-style agent response card */
                                                 <div className="w-full max-w-[95%]">

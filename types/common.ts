@@ -94,6 +94,12 @@ export interface ChatMessage {
     adjustments?: string[];
     analysis?: string;
   };
+  // User skill invocation structured data
+  skillData?: {
+    id: string;
+    name: string;
+    iconName: string;
+  };
 }
 
 export interface Template {

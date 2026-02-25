@@ -321,6 +321,22 @@ export abstract class EnhancedBaseAgent {
             }
         }
 
+        // 5.5 如果 AI 选择对话而非直接生成（proposals 为空但有 message，且不是被强制补充skillCall的），返回对话响应
+        if (effectiveProposals.length === 0 && plan.message && !plan.skillCalls?.length && !task.input.metadata?.forceSkills) {
+            return {
+                ...task,
+                status: 'completed',
+                output: {
+                    message: plan.message,
+                    analysis: plan.analysis,
+                    proposals: [],
+                    assets: [],
+                    adjustments: plan.suggestions || []
+                },
+                updatedAt: Date.now()
+            };
+        }
+
         // 5. 并行执行所有 proposals 的 skillCalls（大幅提速）
         if (effectiveProposals.length > 0) {
             const generatedAssets: GeneratedAsset[] = [];
@@ -496,7 +512,8 @@ ${['cameron'].includes(this.agentInfo.id) ? '' : `【产品识别 - 最高优先
 {
   "analysis": "用中文简要分析用户需求",
   "proposals": [{"id": "1", "title": "中文标题", "description": "中文描述", "skillCalls": [{"skillName": "generateImage", "params": {"prompt": "...", "referenceImage": "ATTACHMENT_0", "aspectRatio": "1:1", "model": "Nano Banana Pro"}}]}],
-  "message": "用中文回复用户"
+  "message": "用中文回复用户",
+  "suggestions": ["可选：如果需要用户提供更多信息或选择项，可在此提供1-4个建议短语供用户快速点击，例如'温馨日常故事'"]
 }`;
 
             // Build content parts - text + image attachments for visual understanding
