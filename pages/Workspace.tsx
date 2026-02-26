@@ -20,7 +20,7 @@ import {
     Scan, ZoomIn, Scaling, Wand2
 } from 'lucide-react';
 import { createChatSession, sendMessage, generateImage, generateVideo, extractTextFromImage, analyzeImageRegion } from '../services/gemini';
-import { ChatMessage, Template, CanvasElement, ShapeType, Marker, Project } from '../types';
+import { ChatMessage, Template, CanvasElement, ShapeType, Marker, Project, ConversationSession } from '../types';
 import { getProject, saveProject, formatDate } from '../services/storage';
 import { Content } from '@google/genai';
 import { useAgentOrchestrator } from '../hooks/useAgentOrchestrator';
@@ -183,115 +183,9 @@ interface InputBlock {
     file?: File;
 }
 
-// 对话历史会话类型
-interface ConversationSession {
-    id: string;
-    title: string;
-    messages: ChatMessage[];
-    createdAt: number;
-    updatedAt: number;
-}
+// (Removed legacy localStorage conversation logic - now completely handled by IndexedDB within the Project object to prevent QuotaExceeded errors and isolate conversations)
 
-const CONVERSATIONS_KEY = 'xc_studio_conversations';
-const ACTIVE_CONVERSATION_KEY = 'xc_studio_active_conversation';
-
-function loadConversations(): ConversationSession[] {
-    try {
-        const raw = localStorage.getItem(CONVERSATIONS_KEY);
-        if (!raw) return [];
-        const parsed = JSON.parse(raw) as ConversationSession[];
-
-        // 自动清理历史遗留的 base64 数据（释放 localStorage 空间）
-        let needsCleanup = false;
-        for (const conv of parsed) {
-            for (const msg of conv.messages || []) {
-                if (msg.attachments?.some((a: string) => a.startsWith('data:'))) {
-                    needsCleanup = true;
-                    msg.attachments = msg.attachments.map((a: string) =>
-                        a.startsWith('data:') ? '[图片附件]' : a
-                    );
-                }
-                if (msg.agentData?.imageUrls?.some((u: string) => u.startsWith('data:'))) {
-                    needsCleanup = true;
-                    msg.agentData.imageUrls = msg.agentData.imageUrls.map((u: string) =>
-                        u.startsWith('data:') ? '[已生成图片]' : u
-                    );
-                }
-            }
-        }
-        if (needsCleanup) {
-            try {
-                localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(parsed));
-                console.log('[loadConversations] 已清理历史 base64 数据');
-            } catch {
-                // 清理后仍然存不下，直接清空
-                localStorage.removeItem(CONVERSATIONS_KEY);
-                return [];
-            }
-        }
-        return parsed;
-    } catch {
-        localStorage.removeItem(CONVERSATIONS_KEY);
-        return [];
-    }
-}
-
-function saveConversations(conversations: ConversationSession[]) {
-    try {
-        // 限制最多保存 20 个会话（按更新时间排序，保留最新）
-        let toSave = conversations
-            .sort((a, b) => b.updatedAt - a.updatedAt)
-            .slice(0, 20);
-
-        // 保存前清理 base64 数据（避免 localStorage 配额溢出）
-        const cleaned = toSave.map(conv => ({
-            ...conv,
-            messages: conv.messages.map(msg => ({
-                ...msg,
-                // 清理用户上传的附件 base64
-                attachments: msg.attachments?.map(att =>
-                    att.startsWith('data:') ? '[图片附件]' : att
-                ),
-                // 清理 Agent 生成的图片 base64
-                agentData: msg.agentData ? {
-                    ...msg.agentData,
-                    imageUrls: msg.agentData.imageUrls?.map(url =>
-                        url.startsWith('data:') ? '[已生成图片]' : url
-                    )
-                } : undefined
-            }))
-        }));
-
-        localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(cleaned));
-    } catch (e: any) {
-        console.warn('[saveConversations] 保存失败:', e.message);
-        // 配额不足时尝试清理旧数据后重试
-        if (e.name === 'QuotaExceededError' || e.message?.includes('quota')) {
-            try {
-                // 只保留最新 5 个会话
-                const minimal = conversations
-                    .sort((a, b) => b.updatedAt - a.updatedAt)
-                    .slice(0, 5)
-                    .map(conv => ({
-                        ...conv,
-                        messages: conv.messages.slice(-10).map(msg => ({
-                            ...msg,
-                            attachments: undefined,
-                            agentData: msg.agentData ? {
-                                ...msg.agentData,
-                                imageUrls: undefined
-                            } : undefined
-                        }))
-                    }));
-                localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(minimal));
-            } catch {
-                // 最后手段：清空会话存储
-                localStorage.removeItem(CONVERSATIONS_KEY);
-                console.warn('[saveConversations] 已清空会话存储以恢复空间');
-            }
-        }
-    }
-}
+// Using IndexedDB now for saveConversations via saveProject
 
 const Workspace: React.FC = () => {
     const navigate = useNavigate();
@@ -350,25 +244,24 @@ const Workspace: React.FC = () => {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [isTyping, setIsTyping] = useState(false);
     // 对话历史管理
-    const [conversations, setConversations] = useState<ConversationSession[]>(() => loadConversations());
-    // Remove global ACTIVE_CONVERSATION_KEY binding, actively map the session to the project id
+    const [conversations, setConversations] = useState<ConversationSession[]>([]);
     const [activeConversationId, setActiveConversationId] = useState<string>('');
 
-    // 当项目 id 变化时，立刻尝试从 localStorage 加载此项目的对话
+    // 当项目 id 变化时，如果 project 尚未加载完成，这会在 loadProject 中处理
+    // 但如果想单独初始化 activeConversationId，可以在此
     useEffect(() => {
         if (!id) return;
         setActiveConversationId(id);
         const projectConversation = conversations.find(c => c.id === id);
         if (projectConversation) {
             setMessages(projectConversation.messages);
-            // 如果项目标题原来是默认的，顺便从历史对话更新一下（可选）
             if (projectConversation.title && projectTitle === '未命名' && projectConversation.title !== '新对话') {
                 setProjectTitle(projectConversation.title);
             }
         } else {
             setMessages([]);
         }
-    }, [id]);
+    }, [id, conversations.length === 0]);
 
     const [historySearch, setHistorySearch] = useState('');
     const [showAssistant, setShowAssistant] = useState(true);
@@ -1008,11 +901,11 @@ const Workspace: React.FC = () => {
         const save = async () => {
             const firstImage = elements.find(el => el.type === 'image' || el.type === 'gen-image');
             const thumbnail = firstImage?.url || '';
-            await saveProject({ id, title: projectTitle, updatedAt: formatDate(Date.now()), elements, markers, thumbnail });
+            await saveProject({ id, title: projectTitle, updatedAt: formatDate(Date.now()), elements, markers, thumbnail, conversations });
         };
         const timeout = setTimeout(save, 1000);
         return () => clearTimeout(timeout);
-    }, [elements, markers, id, projectTitle]);
+    }, [elements, markers, conversations, id, projectTitle]);
 
     const updateSelectedElement = (updates: Partial<CanvasElement>) => {
         if (!selectedElementId) return;
@@ -1349,6 +1242,12 @@ const Workspace: React.FC = () => {
                     // the corresponding File objects in inputBlocks cannot be serialized/restored
                     // Markers are session-specific and should be recreated by user
                     if (project.title) setProjectTitle(project.title);
+                    if (project.conversations) {
+                        setConversations(project.conversations);
+                        // Also try to restore the active conversation's messages
+                        const activeC = project.conversations.find(c => c.id === id);
+                        if (activeC) setMessages(activeC.messages);
+                    }
                     setHistory([{ elements: project.elements || [], markers: [] }]);
                     setHistoryStep(0);
                 }
@@ -1403,27 +1302,37 @@ const Workspace: React.FC = () => {
     useEffect(() => {
         if (messages.length === 0 || !id) return;
         setConversations(prev => {
-            const conversationId = id; // Project ID is the Conversation ID
+            const conversationId = activeConversationId || id;
             let updated = [...prev];
             const idx = updated.findIndex(c => c.id === conversationId);
 
             if (idx === -1) {
-                // 当前项目还未保存过历史
-                const firstUserMsg = messages.find(m => m.role === 'user');
-                const title = firstUserMsg?.text?.substring(0, 30) || '新对话';
-                updated.push({ id: conversationId, title, messages, createdAt: Date.now(), updatedAt: Date.now() });
-            } else {
-                // 更新现有历史
-                updated[idx] = { ...updated[idx], messages, updatedAt: Date.now() };
-                if (!updated[idx].title || updated[idx].title === '新对话') {
-                    const firstUserMsg = messages.find(m => m.role === 'user');
-                    if (firstUserMsg) updated[idx].title = firstUserMsg.text.substring(0, 30);
+                // If it's a new conversation, create it
+                const firstUserMessage = messages.find(m => m.role === 'user');
+                let curTitle = '新对话';
+                if (firstUserMessage) {
+                    curTitle = firstUserMessage.text.slice(0, 15) + (firstUserMessage.text.length > 15 ? '...' : '');
+                } else if (projectTitle !== '未命名') {
+                    curTitle = projectTitle;
                 }
+                updated.push({
+                    id: conversationId,
+                    title: curTitle,
+                    messages: messages,
+                    createdAt: Date.now(),
+                    updatedAt: Date.now()
+                });
+            } else {
+                updated[idx] = {
+                    ...updated[idx],
+                    messages: messages,
+                    updatedAt: Date.now()
+                };
             }
-            saveConversations(updated);
+
             return updated;
         });
-    }, [messages, id]);
+    }, [messages, id, activeConversationId, projectTitle]);
 
     useEffect(() => {
         const handleGlobalClick = (e: MouseEvent) => {
@@ -3963,7 +3872,7 @@ const Workspace: React.FC = () => {
                                     </button>
 
                                     {showHistoryPopover && (
-                                        <div className="absolute top-full left-1/2 -translate-x-1/2 mt-2 w-72 bg-white rounded-xl shadow-xl border border-gray-200 p-3 z-[60] animate-in fade-in zoom-in-95 duration-200 history-popover-content text-left">
+                                        <div className="absolute top-full right-0 mt-2 w-72 bg-white rounded-xl shadow-xl border border-gray-200 p-3 z-[60] animate-in fade-in zoom-in-95 duration-200 history-popover-content text-left">
                                             <div className="flex items-center justify-between mb-3 px-1">
                                                 <h3 className="font-medium text-sm text-gray-900">历史对话</h3>
                                                 <div className="relative">
@@ -4011,7 +3920,6 @@ const Workspace: React.FC = () => {
                                                                     e.stopPropagation();
                                                                     const updated = conversations.filter(c => c.id !== conversation.id);
                                                                     setConversations(updated);
-                                                                    saveConversations(updated);
                                                                     if (activeConversationId === conversation.id) { setActiveConversationId(''); setMessages([]); }
                                                                 }}
                                                                 className="text-gray-300 hover:text-red-400 transition flex-shrink-0"

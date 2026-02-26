@@ -70,6 +70,14 @@ export interface Marker {
   height?: number; // Optional height of the marked region
 }
 
+export interface ConversationSession {
+  id: string;
+  title: string;
+  messages: ChatMessage[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface Project {
   id: string;
   title: string;
@@ -77,6 +85,7 @@ export interface Project {
   thumbnail?: string;
   elements?: CanvasElement[];
   markers?: Marker[];
+  conversations?: ConversationSession[];
 }
 
 export interface ChatMessage {
