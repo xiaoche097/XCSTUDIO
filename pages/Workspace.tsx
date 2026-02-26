@@ -1700,12 +1700,27 @@ const Workspace: React.FC = () => {
             if (resultUrl) {
                 const img = new Image();
                 img.src = resultUrl;
-                img.onload = () => {
+                img.onload = async () => {
                     const update2 = elements.map(e => e.id === elementId ? { ...e, isGenerating: false, url: resultUrl } : e);
                     setElements(update2);
                     saveToHistory(update2, markers);
 
-                    // 同步结果到消息列表，使其出现在已生成文件列表中
+                    // 同步结果到消息列表，将其转为 base64 以保证刷新后不丢失
+                    let persistentUrl = resultUrl;
+                    if (resultUrl.startsWith('blob:')) {
+                        try {
+                            const res = await fetch(resultUrl);
+                            const blob = await res.blob();
+                            persistentUrl = await new Promise<string>((resolve) => {
+                                const reader = new FileReader();
+                                reader.onloadend = () => resolve(reader.result as string);
+                                reader.readAsDataURL(blob);
+                            });
+                        } catch (err) {
+                            console.error("Failed to convert generated image blob to base64 for chat history", err);
+                        }
+                    }
+
                     setMessages(prev => [...prev, {
                         id: Date.now().toString(),
                         role: 'model',
@@ -1714,7 +1729,7 @@ const Workspace: React.FC = () => {
                         agentData: {
                             model: el.genModel || 'Nano Banana Pro',
                             title: '生成图片',
-                            imageUrls: [resultUrl]
+                            imageUrls: [persistentUrl]
                         }
                     }]);
                 };
@@ -1755,6 +1770,22 @@ const Workspace: React.FC = () => {
                 setElements(update2);
                 saveToHistory(update2, markers);
 
+                // Convert video blob to base64 for persistent chat storage
+                let persistentUrl = resultUrl;
+                if (resultUrl.startsWith('blob:')) {
+                    try {
+                        const res = await fetch(resultUrl);
+                        const blob = await res.blob();
+                        persistentUrl = await new Promise<string>((resolve) => {
+                            const reader = new FileReader();
+                            reader.onloadend = () => resolve(reader.result as string);
+                            reader.readAsDataURL(blob);
+                        });
+                    } catch (err) {
+                        console.error("Failed to convert generated video blob to base64 for chat history", err);
+                    }
+                }
+
                 // 同步结果到消息列表，使其出现在已生成文件列表中
                 setMessages(prev => [...prev, {
                     id: Date.now().toString(),
@@ -1764,7 +1795,7 @@ const Workspace: React.FC = () => {
                     agentData: {
                         model: el.genModel || 'Veo 3.1 Fast',
                         title: '生成视频',
-                        videoUrls: [resultUrl]
+                        videoUrls: [persistentUrl]
                     }
                 }]);
             } else {
