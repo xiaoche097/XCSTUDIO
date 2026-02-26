@@ -30,7 +30,7 @@ const circuitBreaker = {
     lastFailureTime: 0,
     isOpen: false,
     threshold: 3,          // 连续失败 N 次后熔断
-    resetTimeout: 60_000,  // 熔断后 60 秒自动恢复（半开状态）
+    resetTimeout: 20_000,  // 熔断后 20 秒自动恢复（半开状态）
 };
 
 /** 路由结果 LRU 缓存 — 仅缓存高置信度结果，减少重复 LLM 调用 */
@@ -79,7 +79,7 @@ interface RouteConfig {
 
 const DEFAULT_CONFIG: RouteConfig = {
     maxRetries: 1,
-    timeout: 8000,
+    timeout: 5000,
     fallbackAgent: 'poster',
     confidenceThreshold: 0.6
 };

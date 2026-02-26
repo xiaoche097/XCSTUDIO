@@ -15,3 +15,4 @@ export { HistoryControls } from './HistoryControls';
 export { LayersPanel } from './LayersPanel';
 export { CanvasToolbar } from './CanvasToolbar';
 export { ProjectHeader } from './ProjectHeader';
+export { MessageList } from './MessageList';

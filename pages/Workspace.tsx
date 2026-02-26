@@ -28,6 +28,9 @@ import { useProjectContext } from '../hooks/useProjectContext';
 import { getAgentInfo, executeAgentTask } from '../services/agents';
 import { localPreRoute } from '../services/agents/local-router';
 import { AgentAvatar } from '../components/agents/AgentAvatar';
+import { useAgentStore, normalizeInputBlocks } from '../stores/agent.store';
+import { MessageList } from './Workspace/components/MessageList';
+import { ToolbarBottom } from './Workspace/components/ToolbarBottom';
 import { assetsToCanvasElementsAtCenter } from '../utils/canvas-helpers';
 import { AgentSelector } from '../components/agents/AgentSelector';
 import { TaskProgress } from '../components/agents/TaskProgress';
@@ -37,12 +40,6 @@ import { videoGenSkill } from '../services/skills/video-gen.skill';
 import { smartEditSkill } from '../services/skills/smart-edit.skill';
 import { touchEditSkill } from '../services/skills/touch-edit.skill';
 import { exportSkill } from '../services/skills/export.skill';
-const SmartMessageRenderer = ({ text, onGenerate, onAction }: { text: string, onGenerate: (prompt: string) => void, onAction?: (action: string) => void }) => {
-    // Simple text renderer - agent structured data handled by agentData in message rendering
-    const cleanText = text.replace(/---AGENT_IMAGES---[\s\S]*$/m, '').trim();
-    if (!cleanText) return <div className="whitespace-pre-wrap">{text}</div>;
-    return <div className="whitespace-pre-wrap">{cleanText}</div>;
-};
 
 
 const TEMPLATES: Template[] = [
@@ -237,12 +234,12 @@ const Workspace: React.FC = () => {
     const [videoToolbarTab, setVideoToolbarTab] = useState<'frames' | 'motion' | 'multi'>('frames');
     const [showFramePanel, setShowFramePanel] = useState(false);
     const [showFastEdit, setShowFastEdit] = useState(false);
-    const [fastEditPrompt, setFastEditPrompt] = useState('');
+    const fastEditPrompt = useAgentStore(s => s.fastEditPrompt);
     const [history, setHistory] = useState<HistoryState[]>([{ elements: [], markers: [] }]);
     const [historyStep, setHistoryStep] = useState(0);
     const [prompt, setPrompt] = useState('');
-    const [messages, setMessages] = useState<ChatMessage[]>([]);
-    const [isTyping, setIsTyping] = useState(false);
+    const messages = useAgentStore(s => s.messages);
+    const isTyping = useAgentStore(s => s.isTyping);
     // 对话历史管理
     const [conversations, setConversations] = useState<ConversationSession[]>([]);
     const [activeConversationId, setActiveConversationId] = useState<string>('');
@@ -266,106 +263,40 @@ const Workspace: React.FC = () => {
     const [historySearch, setHistorySearch] = useState('');
     const [showAssistant, setShowAssistant] = useState(true);
     const [isHoveringVideoFrames, setIsHoveringVideoFrames] = useState<{ [id: string]: boolean }>({});
-    const [inputBlocks, setInputBlocks] = useState<InputBlock[]>([{ id: 'init', type: 'text', text: '' }]);
-    const [activeBlockId, setActiveBlockId] = useState<string>('init');
-    const [selectionIndex, setSelectionIndex] = useState<number | null>(null);
+    const inputBlocks = useAgentStore(s => s.inputBlocks);
+    const activeBlockId = useAgentStore(s => s.activeBlockId);
+    const selectionIndex = useAgentStore(s => s.selectionIndex);
     const [selectedChipId, setSelectedChipId] = useState<string | null>(null); // For arrow key chip selection
     const [isInputFocused, setIsInputFocused] = useState(false);
     const [hoveredChipId, setHoveredChipId] = useState<string | null>(null); // For hover preview
 
-    // prompt/attachments legacy states replaced by inputBlocks effectively, 
+    // prompt/attachments legacy states replaced by inputBlocks effectively,
     // but keeping 'prompt' sync for other potential uses if needed, or simply deriving in handleSend.
     // We will ignore 'prompt' and 'attachments' state for the INPUT area.
-    const [modelMode, setModelMode] = useState<'thinking' | 'fast'>('thinking');
-    const [webEnabled, setWebEnabled] = useState(false);
-    const [imageModelEnabled, setImageModelEnabled] = useState(false);
+    const modelMode = useAgentStore(s => s.modelMode);
+    const webEnabled = useAgentStore(s => s.webEnabled);
+    const imageModelEnabled = useAgentStore(s => s.imageModelEnabled);
 
-    const activeBlockIdRef = useRef(activeBlockId);
-    const selectionIndexRef = useRef(selectionIndex);
+    // ─── Store actions ───
+    const {
+        setMessages, addMessage, clearMessages,
+        setInputBlocks, setActiveBlockId, setSelectionIndex,
+        setIsTyping, setModelMode, setWebEnabled, setImageModelEnabled,
+        setImageGenRatio, setImageGenRes, setImageGenUpload,
+        setVideoGenRatio, setVideoGenDuration, setVideoGenQuality,
+        setVideoGenModel, setVideoGenMode, setVideoStartFrame, setVideoEndFrame,
+        setVideoMultiRefs, setShowVideoModelDropdown,
+        setDetectedTexts, setEditedTexts, setIsExtractingText,
+        setFastEditPrompt, setBrushSize, setUpscaleMenuOpen,
+        setIsAgentMode, insertInputFile,
+    } = useAgentStore(s => s.actions);
 
-    useEffect(() => { activeBlockIdRef.current = activeBlockId; }, [activeBlockId]);
-    useEffect(() => { selectionIndexRef.current = selectionIndex; }, [selectionIndex]);
+    // Reactive focus: when activeBlockId changes (e.g. after insertInputFile), focus the new block
+    useEffect(() => {
+        const el = document.getElementById(`input-block-${activeBlockId}`) as HTMLInputElement;
+        if (el) el.focus();
+    }, [activeBlockId]);
 
-    // Normalize input blocks: merge adjacent text blocks and ensure at least one text block
-    const normalizeInputBlocks = (blocks: InputBlock[]): InputBlock[] => {
-        if (blocks.length === 0) return [{ id: `text-${Date.now()}`, type: 'text', text: '' }];
-        const result: InputBlock[] = [];
-        for (const block of blocks) {
-            if (block.type === 'text') {
-                const last = result[result.length - 1];
-                if (last && last.type === 'text') {
-                    last.text = (last.text || '') + (block.text || '');
-                    continue;
-                }
-            }
-            result.push({ ...block });
-        }
-        // If result ends with a file, add an empty text block for continuation
-        if (result[result.length - 1]?.type === 'file') {
-            result.push({ id: `text-${Date.now()}`, type: 'text', text: '' });
-        }
-        return result;
-    };
-
-    // Insert File Logic for Blocks (Moved to top for scope visibility)
-    // Uses Refs to ensure event handlers (paste) get current cursor
-    const insertInputFile = (file: File) => {
-        console.log('insertInputFile called:', file.name, 'Current blocks:', inputBlocks.length, 'Active ID:', activeBlockIdRef.current);
-        setInputBlocks(prev => {
-            console.log('Prev blocks:', prev.length, 'Block IDs:', prev.map(b => b.id));
-            const currentActiveId = activeBlockIdRef.current;
-            const currentSelectionIdx = selectionIndexRef.current;
-
-            const activeIndex = prev.findIndex(b => b.id === currentActiveId);
-            console.log('Active index:', activeIndex, 'Looking for ID:', currentActiveId);
-
-            if (activeIndex === -1) {
-                console.log('Active block not found! Appending to end.');
-                return [...prev, { id: `file-${Date.now()}`, type: 'file', file }, { id: `text-${Date.now()}`, type: 'text', text: '' }];
-            }
-
-            const activeBlock = prev[activeIndex];
-            console.log('Active block found:', activeBlock.type, activeBlock.id);
-
-            if (activeBlock.type === 'text') {
-                const text = activeBlock.text || '';
-                const idx = currentSelectionIdx !== null ? currentSelectionIdx : text.length;
-                const preText = text.slice(0, idx);
-                const postText = text.slice(idx);
-
-                console.log('Splitting text block. Pre:', preText, 'Post:', postText);
-
-                const newBlocks: InputBlock[] = [
-                    { ...activeBlock, text: preText },
-                    { id: `file-${Date.now()}`, type: 'file', file },
-                    { id: `text-${Date.now()}`, type: 'text', text: postText }
-                ];
-
-                console.log('New blocks created:', newBlocks.length, newBlocks.map(b => `${b.type}:${b.id}`));
-
-                // Auto-focus the post-text block
-                const newBlockId = newBlocks[2].id;
-                setTimeout(() => {
-                    setActiveBlockId(newBlockId);
-                    setSelectionIndex(0); // Start of new block
-                    // 直接聚焦 DOM 元素
-                    const inputEl = document.getElementById(`input-block-${newBlockId}`) as HTMLInputElement;
-                    if (inputEl) {
-                        inputEl.focus();
-                    }
-                }, 50);
-
-                const before = prev.slice(0, activeIndex);
-                const after = prev.slice(activeIndex + 1);
-                const result = [...before, ...newBlocks, ...after];
-                console.log('Returning merged blocks:', result.length);
-                return normalizeInputBlocks(result);
-            } else {
-                console.log('Active block is not text, appending after');
-                return normalizeInputBlocks([...prev, { id: `file-${Date.now()}`, type: 'file', file }, { id: `text-${Date.now()}`, type: 'text', text: '' }]);
-            }
-        });
-    };
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
     // 创作模式状态: 'agent' | 'image' | 'video'
@@ -373,40 +304,40 @@ const Workspace: React.FC = () => {
     const [creationMode, setCreationMode] = useState<CreationMode>('agent');
     const [showModeSelector, setShowModeSelector] = useState(false);
 
-    // 图像生成器相关状态
-    const [imageGenRatio, setImageGenRatio] = useState('1:1');
-    const [imageGenRes, setImageGenRes] = useState('1K');
-    const [imageGenUpload, setImageGenUpload] = useState<File | null>(null);
+    // 图像生成器相关状态 (from store)
+    const imageGenRatio = useAgentStore(s => s.imageGenRatio);
+    const imageGenRes = useAgentStore(s => s.imageGenRes);
+    const imageGenUpload = useAgentStore(s => s.imageGenUpload);
 
-    // 视频生成器相关状态
-    const [videoGenRatio, setVideoGenRatio] = useState('16:9');
-    const [videoGenDuration, setVideoGenDuration] = useState('8s');
-    const [videoGenQuality, setVideoGenQuality] = useState('1080p');
-    const [videoGenModel, setVideoGenModel] = useState<'Veo 3.1' | 'Veo 3.1 Fast' | 'Kling 2.6'>('Veo 3.1 Fast');
-    const [videoGenMode, setVideoGenMode] = useState<'startEnd' | 'multiRef'>('startEnd');
+    // 视频生成器相关状态 (from store)
+    const videoGenRatio = useAgentStore(s => s.videoGenRatio);
+    const videoGenDuration = useAgentStore(s => s.videoGenDuration);
+    const videoGenQuality = useAgentStore(s => s.videoGenQuality);
+    const videoGenModel = useAgentStore(s => s.videoGenModel);
+    const videoGenMode = useAgentStore(s => s.videoGenMode);
 
-    // 视频上传数据状态
-    const [videoStartFrame, setVideoStartFrame] = useState<File | null>(null);
-    const [videoEndFrame, setVideoEndFrame] = useState<File | null>(null);
-    const [videoMultiRefs, setVideoMultiRefs] = useState<File[]>([]);
+    // 视频上传数据状态 (from store)
+    const videoStartFrame = useAgentStore(s => s.videoStartFrame);
+    const videoEndFrame = useAgentStore(s => s.videoEndFrame);
+    const videoMultiRefs = useAgentStore(s => s.videoMultiRefs);
 
     // Video bottom toolbar dropdowns
-    const [showVideoModelDropdown, setShowVideoModelDropdown] = useState(false);
+    const showVideoModelDropdown = useAgentStore(s => s.showVideoModelDropdown);
     const [showVideoSettingsDropdown, setShowVideoSettingsDropdown] = useState(false);
 
     // 悬停展开与面板状态
     const [isVideoPanelHovered, setIsVideoPanelHovered] = useState(false);
     const [showVideoModelPicker, setShowVideoModelPicker] = useState(false);
 
-    // Legacy agent mode (keeping for compatibility)
-    const [agentMode, setAgentMode] = useState(true);
+    // Agent mode (from store)
+    const agentMode = useAgentStore(s => s.isAgentMode);
 
-    // Image Toolbar States
-    const [upscaleMenuOpen, setUpscaleMenuOpen] = useState(false);
+    // Image Toolbar States (from store)
+    const upscaleMenuOpen = useAgentStore(s => s.upscaleMenuOpen);
     const [toolbarExpanded, setToolbarExpanded] = useState(false);
     const toolbarExpandTimer = useRef<NodeJS.Timeout | null>(null);
     const [eraserMode, setEraserMode] = useState(false);
-    const [brushSize, setBrushSize] = useState(30);
+    const brushSize = useAgentStore(s => s.brushSize);
 
     // Touch Edit States
     const [touchEditMode, setTouchEditMode] = useState(false);
@@ -440,7 +371,7 @@ const Workspace: React.FC = () => {
         if (newMode === modelMode) return;
         if (doNotAskModeSwitch) {
             setModelMode(newMode);
-            setMessages([]);
+            clearMessages();
             return;
         }
         setPendingModelMode(newMode);
@@ -450,7 +381,7 @@ const Workspace: React.FC = () => {
     const confirmModeSwitch = () => {
         if (pendingModelMode) {
             setModelMode(pendingModelMode);
-            setMessages([]);
+            clearMessages();
         }
         setShowModeSwitchDialog(false);
         setPendingModelMode(null);
@@ -624,7 +555,7 @@ const Workspace: React.FC = () => {
                 setElements(prev => prev.map(el => el.id === id ? { ...el, isGenerating: false, url: resultUrl } : el));
 
                 // 同步结果到消息列表，使其出现在已生成文件列表中
-                setMessages(prev => [...prev, {
+                addMessage({
                     id: Date.now().toString(),
                     role: 'model',
                     text: `已为您完成智能生成：${prompt.slice(0, 30)}${prompt.length > 30 ? '...' : ''}`,
@@ -634,7 +565,7 @@ const Workspace: React.FC = () => {
                         title: '智能生成',
                         imageUrls: [resultUrl]
                     }
-                }]);
+                });
             } else {
                 setElements(prev => prev.map(el => el.id === id ? { ...el, isGenerating: false } : el));
             }
@@ -645,20 +576,14 @@ const Workspace: React.FC = () => {
     };
 
     // Agent orchestration
-    const projectContext = useProjectContext(id || '', projectTitle, elements, messages);
-    const { currentTask, isAgentMode, setIsAgentMode, processMessage } = useAgentOrchestrator({
+    const projectContext = useProjectContext(id || '', projectTitle, elements);
+    const { currentTask, processMessage } = useAgentOrchestrator({
         projectContext,
         canvasState: { elements, pan, zoom, showAssistant },
         onElementsUpdate: setElements,
         onHistorySave: (els) => saveToHistory(els, markers),
         autoAddToCanvas: true
     });
-
-    // Sync agentMode state with isAgentMode
-    useEffect(() => {
-        console.log('[Workspace] Setting isAgentMode to:', agentMode);
-        setIsAgentMode(agentMode);
-    }, [agentMode, setIsAgentMode]);
 
     // Close video dropdowns on outside click
     useEffect(() => {
@@ -706,24 +631,22 @@ const Workspace: React.FC = () => {
     // 反向同步：markers 变化时，清理 inputBlocks 中已不存在的 marker chip
     useEffect(() => {
         const markerIds = markers.map(m => m.id);
-        setInputBlocks(prev => {
-            const hasOrphanChip = prev.some(b =>
-                b.type === 'file' && b.file && (b.file as any).markerId && !markerIds.includes((b.file as any).markerId)
-            );
-            if (!hasOrphanChip) return prev;
-            // 移除孤立 chip，并重新编号剩余 chip 的 markerId
-            let filtered = prev.filter(b =>
-                !(b.type === 'file' && b.file && (b.file as any).markerId && !markerIds.includes((b.file as any).markerId))
-            );
-            filtered = normalizeInputBlocks(filtered);
-            let idx = 1;
-            filtered.forEach(b => {
-                if (b.type === 'file' && b.file && (b.file as any).markerId) {
-                    (b.file as any).markerId = idx++;
-                }
-            });
-            return filtered;
+        const currentBlocks = useAgentStore.getState().inputBlocks;
+        const hasOrphanChip = currentBlocks.some(b =>
+            b.type === 'file' && b.file && (b.file as any).markerId && !markerIds.includes((b.file as any).markerId)
+        );
+        if (!hasOrphanChip) return;
+        let filtered = currentBlocks.filter(b =>
+            !(b.type === 'file' && b.file && (b.file as any).markerId && !markerIds.includes((b.file as any).markerId))
+        );
+        filtered = normalizeInputBlocks(filtered);
+        let idx = 1;
+        filtered.forEach(b => {
+            if (b.type === 'file' && b.file && (b.file as any).markerId) {
+                (b.file as any).markerId = idx++;
+            }
         });
+        setInputBlocks(filtered);
     }, [markers]);
 
     // 选中画布元素时，自动将图片插入输入框（在光标位置插入，用户手动删 chip）
@@ -739,14 +662,13 @@ const Workspace: React.FC = () => {
 
         // 取消全部选中时 → 清除自动插入的画布图片 chip（保留标记点 chip 和手动添加的文件）
         if (ids.length === 0 && prev.length > 0) {
-            setInputBlocks(prevBlocks => {
-                const filtered = prevBlocks.filter(b => {
-                    if (b.type !== 'file' || !b.file) return true; // 保留文本块
-                    if ((b.file as any)._canvasAutoInsert) return false; // 移除自动插入的画布图片
-                    return true; // 保留标记点 chip 和手动添加的文件
-                });
-                return normalizeInputBlocks(filtered);
+            const currentBlocks = useAgentStore.getState().inputBlocks;
+            const filtered = currentBlocks.filter(b => {
+                if (b.type !== 'file' || !b.file) return true;
+                if ((b.file as any)._canvasAutoInsert) return false;
+                return true;
             });
+            setInputBlocks(normalizeInputBlocks(filtered));
             return;
         }
 
@@ -781,15 +703,15 @@ const Workspace: React.FC = () => {
 
     // Text Edit Feature State
     const [showTextEditModal, setShowTextEditModal] = useState(false);
-    const [detectedTexts, setDetectedTexts] = useState<string[]>([]);
-    const [editedTexts, setEditedTexts] = useState<string[]>([]);
-    const [isExtractingText, setIsExtractingText] = useState(false);
+    const detectedTexts = useAgentStore(s => s.detectedTexts);
+    const editedTexts = useAgentStore(s => s.editedTexts);
+    const isExtractingText = useAgentStore(s => s.isExtractingText);
     const [showFileListModal, setShowFileListModal] = useState(false);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const refImageInputRef = useRef<HTMLInputElement>(null);
     const chatSessionRef = useRef<any>(null);
-    const messagesEndRef = useRef<HTMLDivElement>(null);
+
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasLayerRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -827,45 +749,44 @@ const Workspace: React.FC = () => {
     };
 
     const removeInputBlock = (blockId: string) => {
-        setInputBlocks(prev => {
-            const idx = prev.findIndex(b => b.id === blockId);
-            if (idx === -1) return prev;
+        const currentBlocks = useAgentStore.getState().inputBlocks;
+        const idx = currentBlocks.findIndex(b => b.id === blockId);
+        if (idx === -1) return;
 
-            const newBlocks = [...prev];
-            const block = newBlocks[idx];
+        const newBlocks = [...currentBlocks];
+        const block = newBlocks[idx];
 
-            // Also remove corresponding markers from canvas if this file had a markerId
-            if (block.file && (block.file as any).markerId) {
-                const markerId = (block.file as any).markerId;
-                const newMarkers = markers.filter(m => m.id !== markerId).map((m, i) => ({ ...m, id: i + 1 }));
-                setMarkers(newMarkers);
-                saveToHistory(elements, newMarkers);
+        // Also remove corresponding markers from canvas if this file had a markerId
+        if (block.file && (block.file as any).markerId) {
+            const markerId = (block.file as any).markerId;
+            const newMarkers = markers.filter(m => m.id !== markerId).map((m, i) => ({ ...m, id: i + 1 }));
+            setMarkers(newMarkers);
+            saveToHistory(elements, newMarkers);
 
-                // Update inputBlocks' files markerIds
-                newBlocks.forEach(b => {
-                    if (b.type === 'file' && b.file && (b.file as any).markerId > markerId) {
-                        (b.file as any).markerId -= 1;
-                    }
-                });
-            }
+            // Update inputBlocks' files markerIds
+            newBlocks.forEach(b => {
+                if (b.type === 'file' && b.file && (b.file as any).markerId > markerId) {
+                    (b.file as any).markerId -= 1;
+                }
+            });
+        }
 
-            // Remove the block
-            newBlocks.splice(idx, 1);
+        // Remove the block
+        newBlocks.splice(idx, 1);
 
-            // Normalize and determine new core focus
-            const normalized = normalizeInputBlocks(newBlocks);
+        // Normalize and determine new core focus
+        const normalized = normalizeInputBlocks(newBlocks);
 
-            // Set active block to the text block nearest to removal point if possible
-            const newActiveIdx = Math.min(idx, normalized.length - 1);
-            const targetBlock = normalized.find((b, i) => i >= newActiveIdx && b.type === 'text')
-                || [...normalized].reverse().find(b => b.type === 'text');
+        // Set active block to the text block nearest to removal point if possible
+        const newActiveIdx = Math.min(idx, normalized.length - 1);
+        const targetBlock = normalized.find((b, i) => i >= newActiveIdx && b.type === 'text')
+            || [...normalized].reverse().find(b => b.type === 'text');
 
-            if (targetBlock) {
-                setActiveBlockId(targetBlock.id);
-            }
+        if (targetBlock) {
+            setActiveBlockId(targetBlock.id);
+        }
 
-            return normalized;
-        });
+        setInputBlocks(normalized);
     };
 
     // contentEditable 光标辅助函数
@@ -1305,7 +1226,7 @@ const Workspace: React.FC = () => {
         }
     }, [id, location.state]);
 
-    useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+
 
     // 对话持久化：messages 变化时自动保存到当前会话
     useEffect(() => {
@@ -1586,7 +1507,7 @@ const Workspace: React.FC = () => {
             id: Date.now().toString(), type: 'gen-video',
             x: centerX - startW / 2, y: centerY - startH / 2,
             width: startW, height: startH,
-            zIndex: elements.length + 1, genModel: videoGenModel, genAspectRatio: videoGenRatio,
+            zIndex: elements.length + 1, genModel: videoGenModel as any, genAspectRatio: videoGenRatio,
             genQuality: videoGenQuality as any, genPrompt: '', genDuration: videoGenDuration as any,
             genStartFrame: videoStartFrame ? URL.createObjectURL(videoStartFrame) : undefined,
             genEndFrame: videoEndFrame ? URL.createObjectURL(videoEndFrame) : undefined,
@@ -1639,7 +1560,7 @@ const Workspace: React.FC = () => {
                         }
                     }
 
-                    setMessages(prev => [...prev, {
+                    addMessage({
                         id: Date.now().toString(),
                         role: 'model',
                         text: `已完成图片生成：${el.genPrompt.slice(0, 30)}${el.genPrompt.length > 30 ? '...' : ''}`,
@@ -1649,7 +1570,7 @@ const Workspace: React.FC = () => {
                             title: '生成图片',
                             imageUrls: [persistentUrl]
                         }
-                    }]);
+                    });
                 };
             } else {
                 const updateFail = elements.map(e => e.id === elementId ? { ...e, isGenerating: false } : e);
@@ -1705,7 +1626,7 @@ const Workspace: React.FC = () => {
                 }
 
                 // 同步结果到消息列表，使其出现在已生成文件列表中
-                setMessages(prev => [...prev, {
+                addMessage({
                     id: Date.now().toString(),
                     role: 'model',
                     text: `已完成视频生成：${el.genPrompt.slice(0, 30)}${el.genPrompt.length > 30 ? '...' : ''}`,
@@ -1715,7 +1636,7 @@ const Workspace: React.FC = () => {
                         title: '生成视频',
                         videoUrls: [persistentUrl]
                     }
-                }]);
+                });
             } else {
                 const updateFail = elements.map(e => e.id === elementId ? { ...e, isGenerating: false } : e);
                 setElements(updateFail);
@@ -2190,7 +2111,7 @@ const Workspace: React.FC = () => {
                             if (trimmed && trimmed !== 'Could not analyze selection.' && trimmed !== 'Analysis failed.') {
                                 (file as any).markerName = trimmed;
                                 // 触发 inputBlocks 重新渲染
-                                setInputBlocks(prev => [...prev]);
+                                setInputBlocks([...useAgentStore.getState().inputBlocks]);
                             }
                         }).catch(() => { });
                     }
@@ -2286,16 +2207,15 @@ const Workspace: React.FC = () => {
         setMarkers(newMarkers);
         saveToHistory(elements, newMarkers);
         // 同步删除对应 chip，并重新编号剩余 chip 的 markerId
-        setInputBlocks(prev => {
-            const filtered = prev.filter(b => !(b.type === 'file' && b.file && (b.file as any).markerId === id));
-            let idx = 1;
-            filtered.forEach(b => {
-                if (b.type === 'file' && b.file && (b.file as any).markerId) {
-                    (b.file as any).markerId = idx++;
-                }
-            });
-            return [...filtered];
+        const currentBlocks = useAgentStore.getState().inputBlocks;
+        const filtered = currentBlocks.filter(b => !(b.type === 'file' && b.file && (b.file as any).markerId === id));
+        let idx = 1;
+        filtered.forEach(b => {
+            if (b.type === 'file' && b.file && (b.file as any).markerId) {
+                (b.file as any).markerId = idx++;
+            }
         });
+        setInputBlocks([...filtered]);
     };
 
     const handleToolMenuMouseEnter = () => { if (closeToolMenuTimerRef.current) clearTimeout(closeToolMenuTimerRef.current); setShowInsertMenu(false); setShowShapeMenu(false); setShowToolMenu(true); };
@@ -2345,7 +2265,7 @@ const Workspace: React.FC = () => {
         }
 
         // Agent mode handling
-        if (agentMode && isAgentMode && textToSend.trim()) {
+        if (agentMode && textToSend.trim()) {
             let agentText = textToSend;
             let attachmentUrls: string[] = [];
 
@@ -2400,7 +2320,7 @@ const Workspace: React.FC = () => {
                 attachments: attachmentUrls.length > 0 ? attachmentUrls : undefined,
                 skillData: finalSkillData
             };
-            setMessages(prev => [...prev, newUserMsg]);
+            addMessage(newUserMsg);
             setInputBlocks([{ id: `text-${Date.now()}`, type: 'text', text: '' }]);
             setIsTyping(true);
 
@@ -2504,7 +2424,7 @@ const Workspace: React.FC = () => {
                 }
 
                 // Build structured agent message (Lovart style)
-                setMessages(prev => [...prev, {
+                addMessage({
                     id: (Date.now() + 1).toString(),
                     role: 'model',
                     text: displayMsg,
@@ -2521,9 +2441,9 @@ const Workspace: React.FC = () => {
                         videoUrls: generatedVideos.length > 0 ? generatedVideos : undefined,
                         adjustments,
                     }
-                }]);
+                });
             } catch (error) {
-                setMessages(prev => [...prev, { id: (Date.now() + 2).toString(), role: 'model', text: `Error: ${error instanceof Error ? error.message : 'Unknown'}`, timestamp: Date.now() }]);
+                addMessage({ id: (Date.now() + 2).toString(), role: 'model', text: `Error: ${error instanceof Error ? error.message : 'Unknown'}`, timestamp: Date.now() });
             } finally {
                 setIsTyping(false);
             }
@@ -2586,7 +2506,7 @@ const Workspace: React.FC = () => {
             timestamp: Date.now(),
             attachments: attachmentUrlsForNormalMode.length > 0 ? attachmentUrlsForNormalMode : undefined
         };
-        setMessages(prev => [...prev, newUserMsg]);
+        addMessage(newUserMsg);
         setInputBlocks([{ id: `text-${Date.now()}`, type: 'text', text: '' }]);
         setMarkers([]);
 
@@ -2601,13 +2521,13 @@ const Workspace: React.FC = () => {
             // Inject system instruction for formatting, hidden from user UI
             const systemInjection = `\n\n[SYSTEM NOTE: When providing visual design options, you MUST provide at least 3 distinct style variations. Output EACH option as a separate JSON block using this schema:\n\`\`\`json:generation\n{"title": "Style Name", "description": "Brief description", "prompt": "Detailed generation prompt"}\n\`\`\`\nDo not combine them. Output 3 separate blocks.]`;
             const responseText = await sendMessage(chatSessionRef.current, fullMessage + systemInjection, filesToSend, enableWebSearch);
-            setMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: 'model', text: responseText, timestamp: Date.now() }]);
+            addMessage({ id: (Date.now() + 1).toString(), role: 'model', text: responseText, timestamp: Date.now() });
         }
         setIsTyping(false);
     };
 
     const startNewChat = () => {
-        setMessages([]);
+        clearMessages();
         setInputBlocks([{ id: 'init', type: 'text', text: '' }]);
         setMarkers([]);
         setWebEnabled(false);
@@ -3866,7 +3786,7 @@ const Workspace: React.FC = () => {
                             <div className="flex items-center gap-0.5">
                                 <button
                                     className="h-7 px-2.5 text-xs text-gray-500 hover:text-gray-800 hover:bg-gray-100 flex items-center justify-center rounded-lg transition-all"
-                                    onClick={() => { setActiveConversationId(''); setMessages([]); setPrompt(''); setCreationMode('agent'); }}
+                                    onClick={() => { setActiveConversationId(''); clearMessages(); setPrompt(''); setCreationMode('agent'); }}
                                 >
                                     <CirclePlus size={15} strokeWidth={1.5} className="mr-1" />
                                     新对话
@@ -3898,7 +3818,7 @@ const Workspace: React.FC = () => {
 
                                             <button
                                                 className="w-full flex items-center justify-center h-8 text-xs mb-3 border border-dashed rounded-md hover:bg-gray-50 transition-colors"
-                                                onClick={() => { setActiveConversationId(''); setMessages([]); setShowHistoryPopover(false); }}
+                                                onClick={() => { setActiveConversationId(''); clearMessages(); setShowHistoryPopover(false); }}
                                             >
                                                 <CirclePlus size={14} strokeWidth={1.5} className="mr-1" />
                                                 新对话
@@ -3929,7 +3849,7 @@ const Workspace: React.FC = () => {
                                                                     e.stopPropagation();
                                                                     const updated = conversations.filter(c => c.id !== conversation.id);
                                                                     setConversations(updated);
-                                                                    if (activeConversationId === conversation.id) { setActiveConversationId(''); setMessages([]); }
+                                                                    if (activeConversationId === conversation.id) { setActiveConversationId(''); clearMessages(); }
                                                                 }}
                                                                 className="text-gray-300 hover:text-red-400 transition flex-shrink-0"
                                                             >
@@ -4090,150 +4010,11 @@ const Workspace: React.FC = () => {
                                     </div>
                                 </motion.div>
                             ) : (
-                                <div className="space-y-4 pb-4">
-                                    {messages.map(msg => (
-                                        <motion.div
-                                            initial={{ opacity: 0, y: 10 }}
-                                            animate={{ opacity: 1, y: 0 }}
-                                            key={msg.id}
-                                            className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                                        >
-                                            {msg.role === 'user' ? (
-                                                msg.skillData ? (
-                                                    <div className="max-w-[85%] rounded-[20px] rounded-tr-sm px-3 py-2 text-[13px] bg-gray-100 text-gray-800 flex flex-col gap-2 relative overflow-hidden group transition">
-                                                        <div className="flex items-center gap-2">
-                                                            {msg.skillData.iconName === 'Store' && <Store size={15} className="text-gray-500" strokeWidth={2} />}
-                                                            {msg.skillData.iconName === 'Layout' && <Layout size={15} className="text-gray-500" strokeWidth={2} />}
-                                                            {msg.skillData.iconName === 'Globe' && <Globe size={15} className="text-gray-500" strokeWidth={2} />}
-                                                            {msg.skillData.iconName === 'FileText' && <FileText size={15} className="text-gray-500" strokeWidth={2} />}
-                                                            {msg.skillData.iconName === 'Film' && <Film size={15} className="text-gray-500" strokeWidth={2} />}
-                                                            {msg.skillData.iconName === 'Box' && <Box size={15} className="text-gray-500" strokeWidth={2} />}
-                                                            {msg.skillData.iconName === 'Video' && <Video size={15} className="text-gray-500" strokeWidth={2} />}
-                                                            {msg.skillData.iconName === 'Sparkles' && <Sparkles size={15} className="text-gray-500" strokeWidth={2} />}
-                                                            <span className="font-semibold">{msg.skillData.name}</span>
-                                                        </div>
-                                                        {/* Preview context */}
-                                                        {msg.attachments && msg.attachments.length > 0 && (
-                                                            <div className={`grid gap-1.5 ${msg.attachments.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
-                                                                {msg.attachments.map((att, i) => (
-                                                                    <img key={i} src={att} className="rounded-lg border border-gray-100 object-cover object-center w-full max-h-20" />
-                                                                ))}
-                                                            </div>
-                                                        )}
-                                                        <div className="text-xs text-gray-500 bg-gray-50 px-2 py-1.5 rounded-lg border border-gray-100 whitespace-nowrap overflow-hidden text-ellipsis max-w-full" title={msg.text}>
-                                                            {msg.text}
-                                                        </div>
-                                                    </div>
-                                                ) : (
-                                                    <div className="max-w-[85%] rounded-2xl rounded-tr-none px-4 py-3 text-sm shadow-sm bg-blue-600 text-white">
-                                                        <div className="whitespace-pre-wrap">{msg.text}</div>
-                                                        {msg.attachments && msg.attachments.length > 0 && (
-                                                            <div className="mt-2 grid grid-cols-2 gap-2">
-                                                                {msg.attachments.map((att, i) => (
-                                                                    <img key={i} src={att} className="rounded-lg border border-white/20" />
-                                                                ))}
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                )
-                                            ) : msg.agentData ? (
-                                                /* Lovart-style agent response card */
-                                                <div className="w-full max-w-[95%]">
-                                                    {/* Message text (short summary, not full analysis) */}
-                                                    <div className="text-[13px] text-gray-700 mb-2 leading-relaxed whitespace-pre-wrap">
-                                                        {msg.text}
-                                                    </div>
-
-                                                    {/* Model badge + Title row */}
-                                                    {(msg.agentData.model || msg.agentData.title) && (
-                                                        <div className="flex items-center gap-2 mb-2 flex-wrap">
-                                                            {msg.agentData.model && (
-                                                                <div className="inline-flex items-center gap-1.5 bg-gray-50 border border-gray-100/80 rounded-full px-2 py-0.5">
-                                                                    <div className="w-3 h-3 bg-gradient-to-br from-yellow-400 to-orange-500 rounded-full" />
-                                                                    <span className="text-[11px] font-medium text-gray-600">{msg.agentData.model}</span>
-                                                                </div>
-                                                            )}
-                                                            {msg.agentData.title && (
-                                                                <span className="text-[13px] font-semibold text-gray-900">{msg.agentData.title}</span>
-                                                            )}
-                                                        </div>
-                                                    )}
-
-                                                    {/* Generated images - grid for multiple */}
-                                                    {msg.agentData.imageUrls && msg.agentData.imageUrls.length > 0 && (
-                                                        <div className={`mb-2 ${msg.agentData.imageUrls.length === 1 ? '' : msg.agentData.imageUrls.length <= 4 ? 'grid grid-cols-2 gap-1.5' : 'grid grid-cols-3 gap-1'}`}>
-                                                            {msg.agentData.imageUrls.map((url, i) => (
-                                                                <img
-                                                                    key={i}
-                                                                    src={url}
-                                                                    className="w-full rounded-xl border border-gray-200 cursor-pointer hover:opacity-90 transition object-cover"
-                                                                    onClick={() => setPreviewUrl(url)}
-                                                                />
-                                                            ))}
-                                                        </div>
-                                                    )}
-
-                                                    {/* Description */}
-                                                    {msg.agentData.description && (
-                                                        <p className="text-[12px] text-gray-500 mb-2 leading-relaxed">{msg.agentData.description}</p>
-                                                    )}
-
-                                                    {/* Adjustment buttons */}
-                                                    {msg.agentData.adjustments && msg.agentData.adjustments.length > 0 && (
-                                                        <div className="flex flex-wrap gap-1.5 mb-2">
-                                                            {msg.agentData.adjustments.map((adj, i) => (
-                                                                <button
-                                                                    key={i}
-                                                                    onClick={() => handleSend(adj)}
-                                                                    className="px-2.5 py-1 text-[11px] font-medium text-gray-600 bg-white hover:bg-gray-50 border border-gray-200 rounded-full transition hover:text-gray-900 shadow-sm"
-                                                                >
-                                                                    {adj}
-                                                                </button>
-                                                            ))}
-                                                        </div>
-                                                    )}
-
-                                                    {/* Feedback buttons */}
-                                                    <div className="flex items-center gap-2 pt-1">
-                                                        <button className="p-1.5 text-gray-300 hover:text-gray-600 transition rounded-lg hover:bg-gray-50">
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M7 10v12" /><path d="M15 5.88 14 10h5.83a2 2 0 0 1 1.92 2.56l-2.33 8A2 2 0 0 1 17.5 22H4a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2h2.76a2 2 0 0 0 1.79-1.11L12 2h0a3.13 3.13 0 0 1 3 3.88Z" /></svg>
-                                                        </button>
-                                                        <button className="p-1.5 text-gray-300 hover:text-gray-600 transition rounded-lg hover:bg-gray-50">
-                                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 14V2" /><path d="M9 18.12 10 14H4.17a2 2 0 0 1-1.92-2.56l2.33-8A2 2 0 0 1 6.5 2H20a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-2.76a2 2 0 0 0-1.79 1.11L12 22h0a3.13 3.13 0 0 1-3-3.88Z" /></svg>
-                                                        </button>
-                                                        <button
-                                                            onClick={() => navigator.clipboard.writeText(msg.text)}
-                                                            className="p-1.5 text-gray-300 hover:text-gray-600 transition rounded-lg hover:bg-gray-50"
-                                                        >
-                                                            <Copy size={14} />
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            ) : (
-                                                /* Regular model message */
-                                                <div className="max-w-[85%] rounded-2xl rounded-tl-none px-4 py-3 text-sm shadow-sm bg-white border border-gray-100 text-gray-800">
-                                                    <SmartMessageRenderer text={msg.text} onGenerate={handleSmartGenerate} onAction={(action) => handleSend(action)} />
-                                                </div>
-                                            )}
-                                        </motion.div>
-                                    ))}
-                                    {isTyping && (
-                                        <div className="flex justify-start">
-                                            <div className="bg-white border border-gray-100 rounded-2xl rounded-tl-none px-4 py-3 shadow-sm flex items-center gap-1.5">
-                                                <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                                                <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                                                <div className="w-1.5 h-1.5 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                                            </div>
-                                        </div>
-                                    )}
-
-                                    {/* Agent Task Progress */}
-                                    {currentTask && (currentTask.status === 'analyzing' || currentTask.status === 'executing') && (
-                                        <TaskProgress task={currentTask} />
-                                    )}
-
-                                    <div ref={messagesEndRef} />
-                                </div>
+                                <MessageList
+                                    onSend={handleSend}
+                                    onSmartGenerate={handleSmartGenerate}
+                                    onPreview={setPreviewUrl}
+                                />
                             )}
                         </div>
 
@@ -4339,13 +4120,13 @@ const Workspace: React.FC = () => {
                                                         <div className="w-14 h-14 border border-gray-200 rounded-xl overflow-hidden shadow-sm">
                                                             <img src={URL.createObjectURL(file)} className="w-full h-full object-cover" />
                                                         </div>
-                                                        <button onClick={() => setVideoMultiRefs(prev => prev.filter((_, i) => i !== idx))} className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-gray-600 hover:bg-gray-800 text-white rounded-full flex items-center justify-center z-10 shadow border border-white">
+                                                        <button onClick={() => setVideoMultiRefs(useAgentStore.getState().videoMultiRefs.filter((_, i) => i !== idx))} className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-gray-600 hover:bg-gray-800 text-white rounded-full flex items-center justify-center z-10 shadow border border-white">
                                                             <X size={10} />
                                                         </button>
                                                     </div>
                                                 ))}
                                                 <label className="w-14 h-14 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center text-gray-400 cursor-pointer hover:border-blue-400 hover:bg-blue-50/50 transition flex-shrink-0 group">
-                                                    <input type="file" accept="image/*" multiple className="hidden" onChange={e => { if (e.target.files) setVideoMultiRefs(prev => [...prev, ...Array.from(e.target.files!)]); }} />
+                                                    <input type="file" accept="image/*" multiple className="hidden" onChange={e => { if (e.target.files) setVideoMultiRefs([...useAgentStore.getState().videoMultiRefs, ...Array.from(e.target.files!)]); }} />
                                                     <Plus size={16} className="group-hover:text-blue-500 transition" />
                                                 </label>
                                             </div>
@@ -4508,7 +4289,7 @@ const Workspace: React.FC = () => {
                                                         }}
                                                         onInput={(e) => {
                                                             const text = e.currentTarget.textContent || '';
-                                                            setInputBlocks(prev => prev.map(b => b.id === block.id ? { ...b, text } : b));
+                                                            setInputBlocks(useAgentStore.getState().inputBlocks.map(b => b.id === block.id ? { ...b, text } : b));
                                                         }}
                                                         onFocus={() => { setActiveBlockId(block.id); setIsInputFocused(true); }}
                                                         onBlur={() => setIsInputFocused(false)}
@@ -4678,21 +4459,21 @@ const Workspace: React.FC = () => {
                                             {showModeSelector && (
                                                 <div className="absolute bottom-full left-0 mb-2 w-36 bg-white rounded-xl shadow-xl border border-gray-200 py-2 z-50">
                                                     <button
-                                                        onClick={() => { setCreationMode('agent'); setShowModeSelector(false); setAgentMode(true); }}
+                                                        onClick={() => { setCreationMode('agent'); setShowModeSelector(false); setIsAgentMode(true); }}
                                                         className={`w-full px-3 py-2 flex items-center gap-2 text-sm hover:bg-gray-50 transition ${creationMode === 'agent' ? 'text-[#3B82F6]' : 'text-gray-700'}`}
                                                     >
                                                         <Sparkles size={14} /> Agent
                                                         {creationMode === 'agent' && <Check size={14} className="ml-auto" />}
                                                     </button>
                                                     <button
-                                                        onClick={() => { setCreationMode('image'); setShowModeSelector(false); setAgentMode(false); }}
+                                                        onClick={() => { setCreationMode('image'); setShowModeSelector(false); setIsAgentMode(false); }}
                                                         className={`w-full px-3 py-2 flex items-center gap-2 text-sm hover:bg-gray-50 transition ${creationMode === 'image' ? 'text-[#3B82F6]' : 'text-gray-700'}`}
                                                     >
                                                         <ImageIcon size={14} /> 图像生成器
                                                         {creationMode === 'image' && <Check size={14} className="ml-auto" />}
                                                     </button>
                                                     <button
-                                                        onClick={() => { setCreationMode('video'); setShowModeSelector(false); setAgentMode(false); }}
+                                                        onClick={() => { setCreationMode('video'); setShowModeSelector(false); setIsAgentMode(false); }}
                                                         className={`w-full px-3 py-2 flex items-center gap-2 text-sm hover:bg-gray-50 transition ${creationMode === 'video' ? 'text-blue-600' : 'text-gray-700'}`}
                                                     >
                                                         <Video size={14} /> 视频生成器
@@ -4946,25 +4727,7 @@ const Workspace: React.FC = () => {
                     </div>
                 </div>
 
-                {/* Bottom Left - Layers/Files Icons + Separator + Zoom Controls (Lovart Style) */}
-                <div className="absolute bottom-5 left-5 flex items-center gap-1.5 z-40 pointer-events-auto">
-                    {/* Layers Icon */}
-                    <button onClick={() => setLeftPanelMode(leftPanelMode === 'layers' ? null : 'layers')} className={`w-7 h-7 flex items-center justify-center rounded-md transition ${leftPanelMode === 'layers' ? 'text-gray-900 bg-gray-200/80' : 'text-gray-500 hover:text-gray-800 hover:bg-white/60'}`} title="图层">
-                        <Layers size={15} strokeWidth={1.8} />
-                    </button>
-                    {/* Files Icon */}
-                    <button onClick={() => setLeftPanelMode(leftPanelMode === 'files' ? null : 'files')} className={`w-7 h-7 flex items-center justify-center rounded-md transition ${leftPanelMode === 'files' ? 'text-gray-900 bg-gray-200/80' : 'text-gray-500 hover:text-gray-800 hover:bg-white/60'}`} title="已生成文件列表">
-                        <Folder size={15} strokeWidth={1.8} />
-                    </button>
-                    {/* Separator */}
-                    <div className="w-px h-4 bg-gray-300/60 mx-0.5"></div>
-                    {/* Zoom Controls */}
-                    <div className="flex items-center gap-0.5">
-                        <button onClick={() => setZoom(z => Math.max(10, z - 10))} className="w-6 h-6 flex items-center justify-center text-gray-500 hover:text-black rounded-md hover:bg-white/60 transition"><Minus size={13} /></button>
-                        <span className="text-[11px] font-medium w-9 text-center text-gray-600 select-none">{Math.round(zoom)}%</span>
-                        <button onClick={() => setZoom(z => Math.min(200, z + 10))} className="w-6 h-6 flex items-center justify-center text-gray-500 hover:text-black rounded-md hover:bg-white/60 transition"><Plus size={13} /></button>
-                    </div>
-                </div>
+                <ToolbarBottom leftPanelMode={leftPanelMode} setLeftPanelMode={setLeftPanelMode} zoom={zoom} setZoom={setZoom} />
 
                 <div ref={containerRef} className="flex-1 overflow-hidden relative bg-[#E8E8E8] w-full h-full select-none" onContextMenu={handleContextMenu} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }} onDrop={handleCanvasDrop} style={{ cursor: (activeTool === 'hand' || isPanning || isSpacePressed) ? (isPanning ? 'grabbing' : 'grab') : (activeTool === 'mark' ? 'crosshair' : (activeTool === 'select' ? 'default' : 'grab')), WebkitUserSelect: 'none' }}>
                     {renderToolbar()}

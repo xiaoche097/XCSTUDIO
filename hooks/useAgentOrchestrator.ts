@@ -3,13 +3,8 @@ import { AgentType, AgentTask, ProjectContext, GeneratedAsset } from '../types/a
 import { routeToAgent, executeAgentTask, getAgentInfo, detectPipeline, executePipeline, PIPELINES } from '../services/agents';
 import { ChatMessage, CanvasElement } from '../types';
 import { assetsToCanvasElementsAtCenter } from '../utils/canvas-helpers';
-
-
-interface AgentMessage extends ChatMessage {
-  agentId?: AgentType;
-  taskId?: string;
-  assets?: GeneratedAsset[];
-}
+import { useAgentStore } from '../stores/agent.store';
+import { localPreRoute } from '../services/agents/local-router';
 
 interface CanvasState {
   elements: CanvasElement[];
@@ -26,24 +21,6 @@ interface UseAgentOrchestratorOptions {
   autoAddToCanvas?: boolean;
 }
 
-/**
- * 增强版智能体编排Hook
- * 
- * 新功能:
- * - 自动将生成的资产添加到画布
- * - 智能居中放置
- * - 完整的生命周期管理
- * - 错误处理和重试
- * 
- * @example
- * const { processMessage, currentTask } = useAgentOrchestrator({
- *   projectContext,
- *   canvasState: { elements, pan, zoom, showAssistant },
- *   onElementsUpdate: setElements,
- *   onHistorySave: saveToHistory,
- *   autoAddToCanvas: true
- * });
- */
 export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
   const {
     projectContext,
@@ -53,16 +30,14 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
     autoAddToCanvas = true
   } = options;
 
-  const [currentTask, setCurrentTask] = useState<AgentTask | null>(null);
-  const [isAgentMode, setIsAgentMode] = useState(false);
+  // Read from store instead of local state
+  const currentTask = useAgentStore(s => s.currentTask);
+  const isAgentMode = useAgentStore(s => s.isAgentMode);
+  const { setCurrentTask, setIsAgentMode } = useAgentStore(s => s.actions);
+
   const [isProcessing, setIsProcessing] = useState(false);
-  const [messages, setMessages] = useState<AgentMessage[]>([]);
-  const conversationHistory = useRef<ChatMessage[]>([]);
   const messageQueue = useRef<Array<{ message: string; attachments?: File[] }>>([]);
 
-  /**
-   * 自动添加资产到画布
-   */
   const addAssetsToCanvas = useCallback((assets: GeneratedAsset[]) => {
     if (!canvasState || !onElementsUpdate || !autoAddToCanvas) {
       console.log('[useAgentOrchestrator] Canvas integration disabled or not configured');
@@ -89,7 +64,6 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
       const updatedElements = [...canvasState.elements, ...newElements];
       onElementsUpdate(updatedElements);
 
-      // 保存到历史
       if (onHistorySave) {
         onHistorySave(updatedElements, []);
       }
@@ -100,10 +74,6 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
     }
   }, [canvasState, onElementsUpdate, onHistorySave, autoAddToCanvas]);
 
-  /**
-   * 处理用户消息并执行智能体任务
-   * 消息必达：任何用户输入都会被处理，不会被静默丢弃
-   */
   const processMessage = useCallback(async (
     message: string,
     attachments?: File[],
@@ -111,7 +81,6 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
   ): Promise<AgentTask | null> => {
     if (!message.trim()) return null;
 
-    // 如果正在处理，将消息加入队列
     if (isProcessing) {
       messageQueue.current.push({ message, attachments });
       console.log('[useAgentOrchestrator] Message queued, queue size:', messageQueue.current.length);
@@ -123,13 +92,13 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
     try {
       console.log('[useAgentOrchestrator] Processing message:', message.substring(0, 50));
 
-      // Update context with current conversation
+      // Read conversation history from store (single source of truth)
       const updatedContext = {
         ...projectContext,
-        conversationHistory: conversationHistory.current
+        conversationHistory: useAgentStore.getState().messages
       };
 
-      // Pipeline 检测：多智能体串联任务优先处理
+      // Pipeline detection
       const pipelineId = detectPipeline(message);
       if (pipelineId && PIPELINES[pipelineId]) {
         const pipeline = PIPELINES[pipelineId];
@@ -149,31 +118,38 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
           setCurrentTask(stepResult);
         });
 
-        // 自动添加所有 Pipeline 生成的资产到画布
         if (pipelineResult.allAssets.length > 0) {
           addAssetsToCanvas(pipelineResult.allAssets);
         }
 
         const lastStep = pipelineResult.steps[pipelineResult.steps.length - 1];
-        // 合并所有步骤的资产到最终结果
         if (lastStep && lastStep.output) {
           lastStep.output.assets = pipelineResult.allAssets;
         }
         setCurrentTask(lastStep || null);
 
-        conversationHistory.current.push(
-          { id: `msg-${Date.now()}`, role: 'user', text: message, timestamp: Date.now() },
-          { id: `msg-${Date.now() + 1}`, role: 'model', text: lastStep?.output?.message || `${pipeline.name}完成`, timestamp: Date.now() }
-        );
+        // Messages are managed by Workspace via addMessage — no need to push here
 
         return lastStep || null;
       }
 
-      // 单智能体路由
+      // Single agent routing — try local keyword match first to skip API call
       console.log('[useAgentOrchestrator] Routing to agent...');
-      let decision = await routeToAgent(message, updatedContext);
+      const localAgent = localPreRoute(message);
+      let decision;
+      if (localAgent) {
+        console.log('[useAgentOrchestrator] Local pre-route hit:', localAgent);
+        decision = {
+          targetAgent: localAgent,
+          taskType: 'local-routed',
+          complexity: 'simple' as const,
+          handoffMessage: `用户请求: ${message}`,
+          confidence: 0.75
+        };
+      } else {
+        decision = await routeToAgent(message, updatedContext);
+      }
 
-      // 兜底：routeToAgent 内部已包含 localPreRoute，这里只做最终 poster fallback
       if (!decision) {
         console.warn('[useAgentOrchestrator] All routing failed, using poster fallback');
         decision = {
@@ -187,7 +163,6 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
 
       console.log('[useAgentOrchestrator] Routed to:', decision.targetAgent);
 
-      // Create task
       const task: AgentTask = {
         id: `task-${Date.now()}`,
         agentId: decision.targetAgent,
@@ -203,24 +178,20 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
 
       setCurrentTask({ ...task, status: 'analyzing' });
 
-      // Execute task — 先短暂显示"分析中"，然后切换到"生成中"
       console.log('[useAgentOrchestrator] Executing task...');
 
-      // 200ms 后自动切换到 executing 状态（路由已完成，接下来是图片生成）
+      // Auto-switch to executing after 200ms
       const executingTimer = setTimeout(() => {
-        setCurrentTask(prev => prev && prev.status === 'analyzing'
-          ? { ...prev, status: 'executing' }
-          : prev
-        );
+        const cur = useAgentStore.getState().currentTask;
+        if (cur && cur.status === 'analyzing') {
+          setCurrentTask({ ...cur, status: 'executing' });
+        }
       }, 200);
 
       const result = await executeAgentTask(task);
       clearTimeout(executingTimer);
       console.log('[useAgentOrchestrator] Task result:', result.status);
-      console.log('[useAgentOrchestrator] Has assets:', !!result.output?.assets);
-      console.log('[useAgentOrchestrator] Has proposals:', !!result.output?.proposals);
 
-      // 自动添加生成的资产到画布
       if (result.output?.assets && result.output.assets.length > 0) {
         console.log('[useAgentOrchestrator] Auto-adding assets to canvas...');
         addAssetsToCanvas(result.output.assets);
@@ -228,27 +199,11 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
 
       setCurrentTask(result);
 
-      // Update conversation history
-      conversationHistory.current.push({
-        id: `msg-${Date.now()}`,
-        role: 'user',
-        text: message,
-        timestamp: Date.now()
-      });
-
-      if (result.output?.message) {
-        conversationHistory.current.push({
-          id: `msg-${Date.now() + 1}`,
-          role: 'model',
-          text: result.output.message,
-          timestamp: Date.now()
-        });
-      }
+      // Messages are managed by Workspace via addMessage — no need to push here
 
       return result;
     } catch (error) {
       console.error('[useAgentOrchestrator] Error:', error);
-      // 错误时也要设置一个失败任务，而不是静默丢弃
       const errorTask: AgentTask = {
         id: `task-${Date.now()}`,
         agentId: 'coco' as AgentType,
@@ -267,10 +222,8 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
     } finally {
       setIsProcessing(false);
 
-      // 处理队列中的下一条消息
       if (messageQueue.current.length > 0) {
         const next = messageQueue.current.shift()!;
-        // 使用 setTimeout 避免同步递归
         setTimeout(() => {
           processMessage(next.message, next.attachments);
         }, 300);
@@ -278,16 +231,14 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
     }
   }, [projectContext, addAssetsToCanvas, isProcessing]);
 
-  /**
-   * 执行选中的Proposal
-   */
   const executeProposal = useCallback(async (proposalId: string): Promise<void> => {
-    if (!currentTask || !currentTask.output?.proposals) {
+    const curTask = useAgentStore.getState().currentTask;
+    if (!curTask || !curTask.output?.proposals) {
       console.error('[useAgentOrchestrator] No current task or proposals');
       return;
     }
 
-    const proposal = currentTask.output.proposals.find(p => p.id === proposalId);
+    const proposal = curTask.output.proposals.find(p => p.id === proposalId);
     if (!proposal) {
       console.error('[useAgentOrchestrator] Proposal not found:', proposalId);
       return;
@@ -296,11 +247,11 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
     try {
       console.log('[useAgentOrchestrator] Executing proposal:', proposal.title);
 
-      setCurrentTask(prev => prev ? { ...prev, status: 'executing' } : null);
+      setCurrentTask({ ...curTask, status: 'executing' });
 
       const task: AgentTask = {
         id: `task-${Date.now()}`,
-        agentId: currentTask.agentId,
+        agentId: curTask.agentId,
         status: 'executing',
         input: {
           message: `Execute proposal: ${proposal.title}`,
@@ -313,7 +264,6 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
       const result = await executeAgentTask(task);
       console.log('[useAgentOrchestrator] Proposal execution result:', result.status);
 
-      // 自动添加生成的资产到画布
       if (result.output?.assets && result.output.assets.length > 0) {
         console.log('[useAgentOrchestrator] Auto-adding proposal assets to canvas...');
         addAssetsToCanvas(result.output.assets);
@@ -322,25 +272,24 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
       setCurrentTask(result);
     } catch (error) {
       console.error('[useAgentOrchestrator] Proposal execution error:', error);
-      setCurrentTask(prev => prev ? { ...prev, status: 'failed' } : null);
+      const cur = useAgentStore.getState().currentTask;
+      if (cur) setCurrentTask({ ...cur, status: 'failed' });
       throw error;
     }
-  }, [currentTask, projectContext, addAssetsToCanvas]);
+  }, [projectContext, addAssetsToCanvas]);
 
   const resetAgent = useCallback(() => {
     setCurrentTask(null);
-    conversationHistory.current = [];
+    useAgentStore.getState().actions.clearMessages();
   }, []);
 
   return {
     currentTask,
     isAgentMode,
-    setIsAgentMode,
     isProcessing,
     processMessage,
     executeProposal,
     addAssetsToCanvas,
     resetAgent,
-    messages
   };
 }
