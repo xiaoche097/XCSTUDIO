@@ -105,6 +105,7 @@ export interface ChatMessage {
       assets?: any[];
       adjustments?: string[];
       analysis?: string;
+      suggestions?: string[]; // 可点击的建议按钮（如"温馨日常故事"、"科技感风格"）
     };
   // User skill invocation structured data
   skillData?: {

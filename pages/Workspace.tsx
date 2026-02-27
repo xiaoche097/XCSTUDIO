@@ -608,6 +608,11 @@ const Workspace: React.FC = () => {
 
         if (!text && attachments.length === 0) return;
 
+        // 首次发送时初始化会话 ID，确保消息能关联到正确的会话
+        if (!activeConversationId) {
+            setActiveConversationId(`conv-${Date.now()}`);
+        }
+
         // 2. 构造并将用户消息添加至 Store
         const userMsg: ChatMessage = {
             id: Date.now().toString(),
@@ -621,16 +626,20 @@ const Workspace: React.FC = () => {
         
         // 3. 进入打字/思考状态，并重置输入区域
         setIsTyping(true);
-        clearMessages(); // 此处清空输入框，而非清空对话消息历史
+        setInputBlocks([{ id: 'init', type: 'text', text: '' }]); // 仅清空输入框，不清空对话消息历史
+        // 强制清空 contentEditable DOM（React 不会自动同步 contentEditable）
+        document.querySelectorAll('[id^="input-block-"]').forEach(el => {
+            (el as HTMLElement).textContent = '';
+        });
 
         try {
             // 4. 调用 Orchestrator 处理任务
-            // Orchestrator 内部会自动检测 Pipeline 或单 Agent，并自动执行 Skills (包括自动添加画布)
+            console.log('[Workspace] handleSend: calling processMessage with text:', text.substring(0, 50));
             const result = await processMessage(text, attachments);
+            console.log('[Workspace] handleSend: processMessage returned:', result?.status, result?.output?.message?.substring(0, 50));
 
             if (result && result.output) {
                 // 5. 构造并添加 Agent 消息
-                // 注意：如果 result.output.assets 有值，说明已自动添加画布，不在此处重复处理
                 const agentMsg: ChatMessage = {
                     id: result.id,
                     role: 'model',
@@ -639,13 +648,21 @@ const Workspace: React.FC = () => {
                     agentData: {
                         model: result.agentId,
                         title: '智能助理',
-                        imageUrls: result.output.imageUrls || [] // 如果是自动生成的，这里会有图片 URL 预览
+                        imageUrls: result.output.imageUrls || [],
+                        analysis: result.output.analysis,
+                        suggestions: result.output.adjustments || [],
                     }
                 };
                 addMessage(agentMsg);
             }
         } catch (error) {
             console.error('[Workspace] handleSend failed:', error);
+            addMessage({
+                id: `err-${Date.now()}`,
+                role: 'model',
+                text: '处理请求时遇到问题，请稍后重试。',
+                timestamp: Date.now(),
+            });
         } finally {
             setIsTyping(false);
         }
@@ -2342,6 +2359,7 @@ const Workspace: React.FC = () => {
     };
 
     const startNewChat = () => {
+        setActiveConversationId('');
         clearMessages();
         setInputBlocks([{ id: 'init', type: 'text', text: '' }]);
         setMarkers([]);
@@ -3603,7 +3621,7 @@ const Workspace: React.FC = () => {
                     >
                         {/* Header with Toolbar - Lovart Style */}
                         <div className="px-3 py-2.5 flex items-center justify-between border-b border-gray-100 z-20 shrink-0 select-none">
-                            <span className="text-sm font-semibold text-gray-900 pl-1">新对话</span>
+                            <span className="text-sm font-semibold text-gray-900 pl-1">{messages.length > 0 ? (conversations.find(c => c.id === activeConversationId)?.title || '对话中') : '新对话'}</span>
                             <div className="flex items-center gap-0.5">
                                 <button
                                     className="h-7 px-2.5 text-xs text-gray-500 hover:text-gray-800 hover:bg-gray-100 flex items-center justify-center rounded-lg transition-all"

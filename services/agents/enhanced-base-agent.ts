@@ -14,6 +14,7 @@ import {
 import { executeSkill, AVAILABLE_SKILLS } from '../skills';
 import { errorHandler, ErrorType, AppError } from '../../utils/error-handler';
 import { buildEcommerceProposals } from './shared/ecommerce-variants';
+import { useAgentStore } from '../../stores/agent.store';
 
 // 带指数退避的重试工具（用于 analyzeAndPlan 等内部调用）
 const retryAsync = async <T>(
@@ -214,8 +215,27 @@ export abstract class EnhancedBaseAgent {
      */
     private async executeInternal(task: AgentTask): Promise<AgentTask> {
         const { message, context } = task.input;
+        const store = useAgentStore.getState();
+
+        // Step 1: 接受任务
+        store.actions.setCurrentTask({
+            ...task,
+            status: 'analyzing',
+            progressMessage: `好的，我来为您处理这个请求`,
+            progressStep: 1,
+            totalSteps: 4,
+        });
 
         // 1. 分析任务并生成执行计划
+        // Step 2: 分析需求
+        store.actions.setCurrentTask({
+            ...task,
+            status: 'analyzing',
+            progressMessage: '正在分析您的需求，制定创作方案...',
+            progressStep: 2,
+            totalSteps: 4,
+        });
+
         const plan = await this.analyzeAndPlan(message, context, task.input.attachments, task.input.metadata);
 
         // 1.5 修复: 顶层键名大小写和别名纠正 (防止 LLM 输出 lowercase 的 keys 或常用别名)
@@ -398,12 +418,36 @@ export abstract class EnhancedBaseAgent {
 
         let skillResults = [];
         if (activeSkillCalls.length > 0) {
+            // Step 3: 生成中
+            const imageCount = activeSkillCalls.filter(c => c.skillName === 'generateImage' || c.skillName === 'imageGenSkill').length;
+            const videoCount = activeSkillCalls.filter(c => c.skillName === 'generateVideo' || c.skillName === 'videoGenSkill').length;
+            const genDesc = imageCount > 0 ? `${imageCount} 张图片` : videoCount > 0 ? `${videoCount} 个视频` : '内容';
+
+            store.actions.setCurrentTask({
+                ...task,
+                status: 'executing',
+                progressMessage: `方案已就绪，正在生成${genDesc}...`,
+                progressStep: 3,
+                totalSteps: 4,
+            });
+
             skillResults = await this.executeSkills(activeSkillCalls, task);
         }
 
         // 7. 提取生成的资产
         const assets = this.extractAssets(skillResults);
         const assetUrls = assets.map(a => a.url);
+
+        // Step 4: 完成
+        if (assets.length > 0) {
+            store.actions.setCurrentTask({
+                ...task,
+                status: 'executing',
+                progressMessage: `已生成 ${assets.length} 张图片，正在添加到画布...`,
+                progressStep: 4,
+                totalSteps: 4,
+            });
+        }
 
         // 8. 组装最终输出
         // 如果资产生成成功，message 应该是完成反馈；否则使用分析信息

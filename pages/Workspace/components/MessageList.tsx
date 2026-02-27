@@ -37,7 +37,7 @@ export const MessageList: React.FC<MessageListProps> = ({ onSend, onSmartGenerat
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [messages]);
+    }, [messages, currentTask?.progressMessage]);
 
     return (
         <div className="space-y-4 pb-4">

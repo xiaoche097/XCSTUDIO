@@ -1,23 +1,15 @@
 import React from 'react';
-import { motion } from 'framer-motion';
-import { Loader2, CheckCircle2, XCircle, Clock } from 'lucide-react';
-import { AgentTask, TaskStatus } from '../../types/agent.types';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Loader2, Sparkles } from 'lucide-react';
+import { AgentTask } from '../../types/agent.types';
 
 interface TaskProgressProps {
   task: AgentTask;
 }
 
-const statusConfig: Record<TaskStatus, { icon: React.ReactNode; color: string; label: string }> = {
-  pending: { icon: <Clock size={12} />, color: '#94a3b8', label: '准备中' },
-  analyzing: { icon: <Loader2 size={12} className="animate-spin" />, color: '#3b82f6', label: '分析需求' },
-  executing: { icon: <Loader2 size={12} className="animate-spin text-purple-500" />, color: '#8b5cf6', label: '模型生成' },
-  completed: { icon: <CheckCircle2 size={12} />, color: '#10b981', label: '已完成' },
-  failed: { icon: <XCircle size={12} />, color: '#ef4444', label: '失败' }
-};
-
 export const TaskProgress: React.FC<TaskProgressProps> = ({ task }) => {
   const [seconds, setSeconds] = React.useState(0);
-  
+
   React.useEffect(() => {
     if (task.status === 'executing' || task.status === 'analyzing') {
       const timer = setInterval(() => setSeconds(s => s + 1), 1000);
@@ -25,38 +17,51 @@ export const TaskProgress: React.FC<TaskProgressProps> = ({ task }) => {
     }
   }, [task.status]);
 
-  const formatTime = (s: number) => {
-    const mins = Math.floor(s / 60);
-    const secs = s % 60;
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
   const isGenerating = task.status === 'executing' || task.status === 'analyzing';
   if (!isGenerating) return null;
 
+  const step = task.progressStep || 1;
+  const total = task.totalSteps || 4;
+  const progressMsg = task.progressMessage || (task.status === 'analyzing' ? '分析需求中...' : '生成中...');
+
   return (
     <motion.div
-      initial={{ opacity: 0, y: 5 }}
+      initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0 }}
-      className="flex items-center justify-between w-full max-w-[400px] py-2 px-1 gap-2"
+      className="w-full max-w-[400px] py-2"
     >
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-1.5 grayscale opacity-70">
-           <Loader2 size={14} className="animate-spin text-black" strokeWidth={1.5} />
-           <span className="text-[12px] font-medium text-gray-600">图片分析...</span>
+      {/* 进度条 */}
+      <div className="flex items-center gap-2 mb-2.5">
+        <div className="flex-1 h-1 bg-gray-100 rounded-full overflow-hidden">
+          <motion.div
+            className="h-full bg-gradient-to-r from-blue-500 to-purple-500 rounded-full"
+            initial={{ width: 0 }}
+            animate={{ width: `${(step / total) * 100}%` }}
+            transition={{ duration: 0.5, ease: 'easeOut' }}
+          />
         </div>
-        <div className="h-3 w-[1px] bg-gray-200"></div>
-        <div className="flex items-center gap-2">
-           <span className="text-[11px] text-gray-400 font-mono">{formatTime(seconds)} / 30秒</span>
-        </div>
+        <span className="text-[10px] text-gray-400 font-mono shrink-0">{step}/{total}</span>
       </div>
-      
-      <div className="flex items-center gap-1.5 opacity-60">
-        <div className="w-4 h-4 rounded-full bg-gray-100 flex items-center justify-center">
-            <div className="w-2 h-2 rounded-full bg-green-500"></div>
+
+      {/* 当前步骤消息 */}
+      <div className="flex items-center gap-2">
+        <div className="w-5 h-5 rounded-full bg-black flex items-center justify-center shrink-0">
+          <Sparkles size={10} className="text-white" />
         </div>
-        <span className="text-[11px] text-gray-500 font-medium">使用 Nano Banana Pro 生成图片...</span>
+        <AnimatePresence mode="wait">
+          <motion.span
+            key={progressMsg}
+            initial={{ opacity: 0, x: -5 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 5 }}
+            transition={{ duration: 0.2 }}
+            className="text-[12px] text-gray-600 font-medium"
+          >
+            {progressMsg}
+          </motion.span>
+        </AnimatePresence>
+        <Loader2 size={12} className="animate-spin text-gray-400 shrink-0 ml-auto" />
       </div>
     </motion.div>
   );

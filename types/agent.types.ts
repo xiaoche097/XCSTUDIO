@@ -34,6 +34,9 @@ export interface AgentTask {
   id: string;
   agentId: AgentType;
   status: TaskStatus;
+  progressMessage?: string;  // 实时进度消息（如"收集灵感..."、"生成图片中..."）
+  progressStep?: number;     // 当前步骤 (1-based)
+  totalSteps?: number;       // 总步骤数
   input: {
     message: string;
     attachments?: File[];

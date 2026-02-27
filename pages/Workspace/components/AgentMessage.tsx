@@ -219,6 +219,22 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({ message, onPreview, 
                     </div>
                 )}
 
+                {/* 6. 建议按钮（可点击快速回复） */}
+                {agentData?.suggestions && agentData.suggestions.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 px-1 mt-1.5">
+                        {agentData.suggestions.map((suggestion, idx) => (
+                            <button
+                                key={idx}
+                                onClick={() => onAction?.(suggestion)}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 bg-white border border-gray-200 rounded-full text-[11px] font-medium text-gray-600 hover:border-gray-400 hover:text-gray-900 hover:shadow-sm transition-all cursor-pointer"
+                            >
+                                <Wand2 size={10} strokeWidth={2} />
+                                {suggestion}
+                            </button>
+                        ))}
+                    </div>
+                )}
+
                 {/* 7. 操作栏 */}
                 <div className="flex items-center gap-0.5 mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
                     <button className="p-1 text-gray-300 hover:text-gray-500 transition-colors">
