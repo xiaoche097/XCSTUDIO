@@ -49,6 +49,7 @@ interface AgentState {
   imageGenRatio: string;
   imageGenRes: string;
   imageGenUpload: File | null;
+  isPickingFromCanvas: boolean;
 
   // 视频生成器配置
   videoGenRatio: string;
@@ -101,6 +102,7 @@ interface AgentState {
     setImageGenRatio: (ratio: string) => void;
     setImageGenRes: (res: string) => void;
     setImageGenUpload: (file: File | null) => void;
+    setIsPickingFromCanvas: (picking: boolean) => void;
 
     setVideoGenRatio: (ratio: string) => void;
     setVideoGenDuration: (duration: string) => void;
@@ -144,6 +146,7 @@ const initialState = {
   imageGenRatio: '1:1',
   imageGenRes: '1K',
   imageGenUpload: null,
+  isPickingFromCanvas: false,
 
   videoGenRatio: '16:9',
   videoGenDuration: '5s',
@@ -273,6 +276,7 @@ export const useAgentStore = create<AgentState>()(
         setImageGenRatio: (ratio) => set({ imageGenRatio: ratio }),
         setImageGenRes: (res) => set({ imageGenRes: res }),
         setImageGenUpload: (file) => set({ imageGenUpload: file }),
+        setIsPickingFromCanvas: (picking) => set({ isPickingFromCanvas: picking }),
 
         setVideoGenRatio: (ratio) => set({ videoGenRatio: ratio }),
         setVideoGenDuration: (duration) => set({ videoGenDuration: duration }),

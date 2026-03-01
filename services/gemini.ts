@@ -1,5 +1,6 @@
 
 import { GoogleGenAI, Chat, GenerateContentResponse, Part, Content, Type } from "@google/genai";
+import { ProviderError } from '../utils/provider-error';
 
 // Helper to get API configurations
 export const getProviderConfig = () => {
@@ -76,6 +77,78 @@ const normalizeUrl = (baseUrl: string): string => {
     return url;
 };
 
+const shouldTryAlternateAuth = (status: number): boolean => {
+    return status === 401 || status === 403 || status === 404;
+};
+
+const isNetworkFetchError = (error: unknown): boolean => {
+    const msg = ((error as any)?.message || '').toLowerCase();
+    return msg.includes('failed to fetch') || msg.includes('network') || msg.includes('cors') || msg.includes('load failed');
+};
+
+type OpenAIAuthMode = 'bearer' | 'query';
+
+const buildOpenAIPath = (baseUrl: string, path: string): string => {
+    const root = normalizeUrl(baseUrl);
+    return path.startsWith('/') ? `${root}${path}` : `${root}/${path}`;
+};
+
+const buildOpenAIHeaders = (authMode: OpenAIAuthMode, apiKey: string): Record<string, string> => {
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json'
+    };
+    if (authMode === 'bearer') {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+    }
+    return headers;
+};
+
+const buildOpenAIUrl = (baseUrl: string, path: string, authMode: OpenAIAuthMode, apiKey: string): string => {
+    const base = buildOpenAIPath(baseUrl, path);
+    if (authMode === 'query') {
+        return `${base}${base.includes('?') ? '&' : '?'}key=${encodeURIComponent(apiKey)}`;
+    }
+    return base;
+};
+
+const fetchOpenAIJsonWithFallback = async <T>(
+    baseUrl: string,
+    path: string,
+    apiKey: string,
+    body: unknown,
+    contextTag: string
+): Promise<T> => {
+    const plans: OpenAIAuthMode[] = ['bearer', 'query'];
+    let lastError: any = null;
+
+    for (const authMode of plans) {
+        const url = buildOpenAIUrl(baseUrl, path, authMode, apiKey);
+        const headers = buildOpenAIHeaders(authMode, apiKey);
+        console.log(`[${contextTag}] POST [${authMode}] ${url.replace(apiKey, '***')}`);
+        const res = await fetch(url, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body),
+        });
+
+        if (res.ok) {
+            return res.json();
+        }
+
+        const errBody = await res.text().catch(() => '');
+        const err: any = new Error(`${contextTag} API error: ${res.status} [${authMode}] ${errBody}`);
+        err.status = res.status;
+        err.authMode = authMode;
+        lastError = err;
+
+        if (!shouldTryAlternateAuth(res.status)) {
+            throw err;
+        }
+    }
+
+    throw lastError || new Error(`${contextTag} API failed on all auth strategies`);
+};
+
 /**
  * Fetch available models from the provider, attempting all provided keys
  */
@@ -108,34 +181,58 @@ export const fetchAvailableModels = async (provider: string, keys: string[], bas
     }
 
     // 2. Standard Logic: Iterate through all keys to find all accessible models
-    const modelsPath = /\/v\d+$/.test(rootUrl) ? `${rootUrl}/models` : `${rootUrl}/v1/models`;
-    const getGoogleUrl = (k: string) => `${rootUrl}/v1/models?key=${k}`;
+    const modelsPath = /\/v\d+(beta)?$/.test(rootUrl) ? `${rootUrl}/models` : `${rootUrl}/v1/models`;
+    const getGoogleUrl = (k: string) => `${rootUrl}/v1/models?key=${encodeURIComponent(k)}`;
 
     for (let i = 0; i < keys.length; i++) {
         const key = keys[i].trim();
         if (!key) continue;
 
         try {
-            const fetchUrl = isGoogle && !baseUrl ? getGoogleUrl(key) : modelsPath;
-            console.log(`[fetchAvailableModels] [${provider}] Key #${i + 1} checking: ${fetchUrl}`);
+            const plans = isGoogle
+                ? [{
+                    url: getGoogleUrl(key),
+                    headers: {}
+                }]
+                : [
+                    {
+                        url: modelsPath,
+                        headers: {
+                            'Authorization': `Bearer ${key}`,
+                            'Content-Type': 'application/json'
+                        }
+                    },
+                    {
+                        url: `${modelsPath}?key=${encodeURIComponent(key)}`,
+                        headers: { 'Content-Type': 'application/json' }
+                    }
+                ];
 
-            const res = await fetch(fetchUrl, {
-                headers: isGoogle && !baseUrl ? {} : {
-                    'Authorization': `Bearer ${key}`,
-                    'Content-Type': 'application/json'
+            let keySucceeded = false;
+            for (const plan of plans) {
+                console.log(`[fetchAvailableModels] [${provider}] Key #${i + 1} checking: ${plan.url}`);
+                const res = await fetch(plan.url, { headers: plan.headers });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    const list = data.models || data.data || (Array.isArray(data) ? data : []);
+                    list.forEach((m: any) => {
+                        const id = typeof m === 'string' ? m : (m.id || m.name || m.model);
+                        if (id) allModels.add(id);
+                    });
+                    console.log(`[fetchAvailableModels] [${provider}] Key #${i + 1} found ${list.length} items.`);
+                    keySucceeded = true;
+                    break;
                 }
-            });
 
-            if (res.ok) {
-                const data = await res.json();
-                const list = data.models || data.data || (Array.isArray(data) ? data : []);
-                list.forEach((m: any) => {
-                    const id = typeof m === 'string' ? m : (m.id || m.name || m.model);
-                    if (id) allModels.add(id);
-                });
-                console.log(`[fetchAvailableModels] [${provider}] Key #${i + 1} found ${list.length} items.`);
-            } else {
-                console.warn(`[fetchAvailableModels] [${provider}] Key #${i + 1} returned ${res.status}`);
+                console.warn(`[fetchAvailableModels] [${provider}] Key #${i + 1} returned ${res.status} for ${plan.url}`);
+                if (!shouldTryAlternateAuth(res.status)) {
+                    break;
+                }
+            }
+
+            if (!keySucceeded) {
+                console.warn(`[fetchAvailableModels] [${provider}] Key #${i + 1} no model list available.`);
             }
         } catch (error) {
             console.error(`[fetchAvailableModels] [${provider}] Key #${i + 1} failed:`, error);
@@ -154,14 +251,55 @@ const getApiUrl = () => {
 };
 
 // Initialize the GenAI client with dynamic key and url
+// 统一模型获取助手：锁定云雾 API 的高阶预览模型 ID
+export const getBestModelId = (type: 'text' | 'image' | 'video' | 'thinking' = 'text'): string => {
+    const config = getProviderConfig();
+    const isProxy = config.id !== 'gemini' || (config.baseUrl && !config.baseUrl.includes('googleapis.com'));
+
+    if (type === 'image') {
+        const s = localStorage.getItem('setting_image_models');
+        const selected = JSON.parse(s || '[]');
+        // 用户指定：自动选择模式下默认首选 Nano Banana Pro (gemini-3-pro-image-preview)
+        if (selected.length === 0 || selected.includes('Auto')) return IMAGE_PRO_MODEL;
+        
+        const first = selected[0];
+        if (first === 'Nano Banana Pro') return IMAGE_PRO_MODEL;
+        if (first === 'NanoBanana2') return IMAGE_NANOBANANA_2_MODEL;
+        if (isProxy && (first.includes('1.5-flash'))) return IMAGE_PRO_MODEL;
+        return first;
+    }
+
+    if (type === 'video') {
+        const s = localStorage.getItem('setting_video_models');
+        const selected = JSON.parse(s || '[]');
+        // 用户要求视频首选 veo3.1fast
+        if (selected.length === 0 || selected.includes('Auto')) return VEO_FAST_MODEL;
+        return selected[0];
+    }
+
+    if (type === 'thinking') {
+        // 用户要求思考模型用 gemini-3.1-pro-preview
+        return THINKING_MODEL;
+    }
+
+    // 常规对话/分析 (text)：用户要求用 gemini-3-flash-preview
+    return FLASH_MODEL;
+};
+
 export const getClient = () => {
     const config: any = { apiKey: getApiKey() };
-    const baseUrl = getApiUrl();
+    let baseUrl = getApiUrl();
     if (baseUrl) {
-        config.httpOptions = { baseUrl }; // @google/genai SDK uses httpOptions.baseUrl
+        // 核心修复：SDK 内部会自动拼装 v1/v1beta，这里必须移除任何结尾的版本路径
+        // 否则会产生 /v1beta/v1beta 的双重路径导致中转站 404
+        baseUrl = baseUrl.replace(/\/+$/, '').replace(/\/v\d+(beta)?$/i, '');
+        config.httpOptions = { baseUrl };
+        console.log(`[GenAI] Using Cleaned Proxy: ${baseUrl}`);
     }
-    return new GoogleGenAI(config);
-};
+    const client = new GoogleGenAI(config);
+    (client as any).getBestModelId = getBestModelId;
+    return client;
+};;
 
 // Get base URL for video REST API (bypasses SDK's predictLongRunning endpoint)
 const getVideoBaseUrl = () => {
@@ -172,6 +310,7 @@ const getVideoBaseUrl = () => {
 // Models
 const PRO_MODEL = 'gemini-3-pro-preview';
 const FLASH_MODEL = 'gemini-3-flash-preview';
+const THINKING_MODEL = 'gemini-3.1-pro-preview';
 // Image Gen models
 const IMAGE_PRO_MODEL = 'gemini-3-pro-image-preview';
 const IMAGE_FLASH_MODEL = 'gemini-3-pro-image-preview';
@@ -180,6 +319,219 @@ const IMAGE_SEEDREAM_MODEL = 'doubao-seedream-5-0-260128';
 // Video Gen models
 const VEO_FAST_MODEL = 'veo-3.1-fast-generate-preview';
 const VEO_PRO_MODEL = 'veo-3.1-generate-preview';
+
+type VideoApiVersion = 'v1beta' | 'v1';
+type VideoAuthMode = 'bearer' | 'query';
+
+const LEGACY_VIDEO_MODEL_MAP: Record<string, string> = {
+    'veo-3.1-fast': VEO_FAST_MODEL,
+    'veo-3.1': VEO_PRO_MODEL,
+    'veo3.1-4k': VEO_PRO_MODEL,
+    'veo3.1-c': VEO_PRO_MODEL,
+};
+
+const normalizeVideoModelId = (modelId: string): string => {
+    const normalized = (modelId || '').trim();
+    if (!normalized) return VEO_FAST_MODEL;
+
+    if (normalized === 'Veo 3.1 Fast') return VEO_FAST_MODEL;
+    if (normalized === 'Veo 3.1' || normalized === 'Veo 3.1 Pro') return VEO_PRO_MODEL;
+
+    const lower = normalized.toLowerCase();
+    if (LEGACY_VIDEO_MODEL_MAP[lower]) return LEGACY_VIDEO_MODEL_MAP[lower];
+
+    return normalized;
+};
+
+const getNormalizedSelectedVideoModels = (): string[] => {
+    const key = 'setting_video_models';
+    const raw = localStorage.getItem(key);
+
+    let parsed: string[] = [];
+    try {
+        const data = JSON.parse(raw || '[]');
+        parsed = Array.isArray(data) ? data.filter(v => typeof v === 'string') : [];
+    } catch {
+        parsed = [];
+    }
+
+    const source = parsed.length > 0 ? parsed : [VEO_FAST_MODEL];
+    const normalized = source.map(normalizeVideoModelId).filter(Boolean);
+    const deduped = Array.from(new Set(normalized));
+
+    if (deduped.length === 0) {
+        const fallback = [VEO_FAST_MODEL];
+        localStorage.setItem(key, JSON.stringify(fallback));
+        return fallback;
+    }
+
+    const originalSerialized = JSON.stringify(source);
+    const normalizedSerialized = JSON.stringify(deduped);
+    if (originalSerialized !== normalizedSerialized) {
+        localStorage.setItem(key, normalizedSerialized);
+        console.log('[generateVideo] Migrated legacy video model ids to canonical ids');
+    }
+
+    return deduped;
+};
+
+const shouldFallbackVideoAuth = (status: number): boolean => {
+    return status === 401 || status === 403 || status === 404;
+};
+
+const buildVideoGenerateUrl = (
+    baseUrl: string,
+    version: VideoApiVersion,
+    modelId: string,
+    authMode: VideoAuthMode,
+    apiKey: string
+): string => {
+    const cleanBase = normalizeUrl(baseUrl);
+    const baseWithoutVersion = cleanBase.replace(/\/v1(?:beta)?$/i, '');
+    const versionBase = cleanBase.endsWith(`/${version}`) ? cleanBase : `${baseWithoutVersion}/${version}`;
+    const path = `${versionBase}/models/${modelId}:generateVideos`;
+    if (authMode === 'query') {
+        return `${path}?key=${encodeURIComponent(apiKey)}`;
+    }
+    return path;
+};
+
+const buildVideoPollUrl = (
+    baseUrl: string,
+    version: VideoApiVersion,
+    operationName: string,
+    authMode: VideoAuthMode,
+    apiKey: string
+): string => {
+    const cleanBase = normalizeUrl(baseUrl);
+    const baseWithoutVersion = cleanBase.replace(/\/v1(?:beta)?$/i, '');
+    const versionBase = cleanBase.endsWith(`/${version}`) ? cleanBase : `${baseWithoutVersion}/${version}`;
+    const path = `${versionBase}/${operationName}`;
+    if (authMode === 'query') {
+        return `${path}?key=${encodeURIComponent(apiKey)}`;
+    }
+    return path;
+};
+
+const buildVideoHeaders = (authMode: VideoAuthMode, apiKey: string): Record<string, string> => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    if (authMode === 'bearer') {
+        headers['Authorization'] = `Bearer ${apiKey}`;
+    }
+    return headers;
+};
+
+const parseVideoUrlFromAnyPayload = (payload: any): string | null => {
+    return payload?.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri
+        || payload?.response?.generatedVideos?.[0]?.video?.uri
+        || payload?.data?.[0]?.url
+        || payload?.data?.[0]?.video?.url
+        || payload?.output?.[0]?.url
+        || payload?.video?.url
+        || payload?.url
+        || null;
+};
+
+const generateVideoOpenAICompatible = async (
+    baseUrl: string,
+    apiKey: string,
+    modelId: string,
+    config: VideoGenerationConfig
+): Promise<string | null> => {
+    const size = config.aspectRatio === '9:16' ? '720x1280' : '1280x720';
+    const requestBody: Record<string, any> = {
+        model: modelId,
+        prompt: config.prompt,
+        n: 1,
+        size,
+    };
+
+    if (config.startFrame) {
+        requestBody.image = config.startFrame;
+        requestBody.input_image = config.startFrame;
+    }
+
+    const submitPlans: OpenAIAuthMode[] = ['bearer', 'query'];
+    let lastError: any = null;
+
+    for (const authMode of submitPlans) {
+        try {
+            const submitUrl = buildOpenAIUrl(baseUrl, '/v1/videos/generations', authMode, apiKey);
+            const submitHeaders = buildOpenAIHeaders(authMode, apiKey);
+            console.log(`[generateVideo/openai] POST [${authMode}] ${submitUrl.replace(apiKey, '***')}`);
+
+            const submitRes = await fetch(submitUrl, {
+                method: 'POST',
+                headers: submitHeaders,
+                body: JSON.stringify(requestBody),
+            });
+
+            if (!submitRes.ok) {
+                const errText = await submitRes.text().catch(() => '');
+                const err: any = new Error(`openai video submit ${submitRes.status} [${authMode}]: ${errText}`);
+                err.status = submitRes.status;
+                lastError = err;
+                if (shouldTryAlternateAuth(submitRes.status)) {
+                    continue;
+                }
+                throw err;
+            }
+
+            const submitData = await submitRes.json();
+            const directUrl = parseVideoUrlFromAnyPayload(submitData);
+            if (directUrl) return directUrl;
+
+            const taskId = submitData?.id || submitData?.task_id || submitData?.data?.[0]?.id;
+            if (!taskId) {
+                lastError = new Error(`openai video submit succeeded but no task id: ${JSON.stringify(submitData).slice(0, 200)}`);
+                continue;
+            }
+
+            const pollPaths = [
+                `/v1/videos/${taskId}`,
+                `/v1/videos/generations/${taskId}`,
+                `/v1/tasks/${taskId}`,
+            ];
+
+            for (let i = 0; i < 60; i++) {
+                await new Promise(resolve => setTimeout(resolve, 5000));
+
+                for (const pollPath of pollPaths) {
+                    try {
+                        const pollUrl = buildOpenAIUrl(baseUrl, pollPath, authMode, apiKey);
+                        const pollHeaders = buildOpenAIHeaders(authMode, apiKey);
+                        const pollRes = await fetch(pollUrl, { headers: pollHeaders });
+                        if (!pollRes.ok) continue;
+                        const pollData = await pollRes.json();
+
+                        const doneUrl = parseVideoUrlFromAnyPayload(pollData);
+                        if (doneUrl) return doneUrl;
+
+                        const status = (pollData?.status || pollData?.state || pollData?.data?.[0]?.status || '').toLowerCase();
+                        if (status === 'failed' || status === 'error' || status === 'cancelled' || status === 'canceled') {
+                            throw new Error(`openai video polling failed: ${JSON.stringify(pollData).slice(0, 200)}`);
+                        }
+                    } catch (pollError) {
+                        lastError = pollError;
+                    }
+                }
+            }
+
+            lastError = new Error('openai video polling timeout');
+        } catch (error) {
+            lastError = error;
+            if (!isNetworkFetchError(error)) {
+                const status = (error as any)?.status;
+                if (status && !shouldTryAlternateAuth(status)) {
+                    break;
+                }
+            }
+        }
+    }
+
+    if (lastError) throw lastError;
+    return null;
+};
 
 // Helper for retry logic
 const retryWithBackoff = async <T>(
@@ -222,6 +574,10 @@ const retryWithBackoff = async <T>(
         }
         throw error;
     }
+};
+
+const extractStatusCode = (error: any): number | undefined => {
+    return error?.status || error?.code || error?.httpCode;
 };
 
 export const createChatSession = (model: string = PRO_MODEL, history: Content[] = [], systemInstruction?: string): Chat => {
@@ -433,7 +789,7 @@ const generateImageDallE3 = async (
     prompt: string,
     aspectRatio: string
 ): Promise<string | null> => {
-    const baseUrl = getApiUrl() || 'https://yunwu.ai';
+    const baseUrl = normalizeUrl(getApiUrl() || 'https://yunwu.ai');
     const apiKey = getApiKey();
 
     // 将宽高比转换为 dall-e-3 支持的尺寸
@@ -445,31 +801,37 @@ const generateImageDallE3 = async (
 
     console.log(`[generateImageDallE3] model=${model}, size=${size}`);
 
-    const response = await retryWithBackoff(async () => {
-        const res = await fetch(`${baseUrl}/v1/images/generations`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-                model,
-                prompt,
-                n: 1,
-                size,
-                response_format: 'b64_json',
-            }),
+    let response: any;
+    try {
+        response = await retryWithBackoff(async () => {
+            return fetchOpenAIJsonWithFallback<any>(
+                baseUrl,
+                '/v1/images/generations',
+                apiKey,
+                {
+                    model,
+                    prompt,
+                    n: 1,
+                    size,
+                    response_format: 'b64_json',
+                },
+                'generateImageDallE3'
+            );
         });
-
-        if (!res.ok) {
-            const errBody = await res.text().catch(() => '');
-            const err: any = new Error(`dall-e-3 API error: ${res.status} ${errBody}`);
-            err.status = res.status;
-            throw err;
-        }
-
-        return res.json();
-    });
+    } catch (error: any) {
+        const status = extractStatusCode(error);
+        throw new ProviderError({
+            provider: getProviderConfig().id || 'unknown',
+            code: status === 401 || status === 403 ? 'AUTH_FAILED' : 'IMAGE_GENERATION_FAILED',
+            status,
+            retryable: status === 429 || status === 500 || status === 503,
+            stage: 'generateRequest',
+            details: error?.message,
+            message: status === 401 || status === 403
+                ? '图像生成鉴权失败，请检查 API Key。'
+                : '图像生成请求失败，请稍后重试。'
+        });
+    }
 
     const b64 = response?.data?.[0]?.b64_json;
     if (b64) {
@@ -513,9 +875,14 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
     localStorage.setItem(storageKeyIdx, ((currentIdx + 1) % targetModels.length).toString());
 
     // Map high-level model names to internal IDs if needed
-    if (targetModelId === 'Nano Banana Pro') targetModelId = IMAGE_PRO_MODEL;
-    else if (targetModelId === 'NanoBanana2') targetModelId = IMAGE_NANOBANANA_2_MODEL;
-    else if (targetModelId === 'Seedream5.0') targetModelId = IMAGE_FLASH_MODEL;
+    if (targetModelId === 'Nano Banana Pro' || targetModelId === 'Auto' || !targetModelId) {
+        targetModelId = IMAGE_PRO_MODEL;
+    } else if (targetModelId === 'NanoBanana2') {
+        targetModelId = IMAGE_NANOBANANA_2_MODEL;
+    } else if (targetModelId.includes('1.5-flash')) {
+        // 强制防止回退到云雾不支持的旧 ID
+        targetModelId = IMAGE_PRO_MODEL;
+    }
 
     // Concurrency check: If user has multi-key, the getApiKey() will handle its own poll.
     // Here we focus on model rotation.
@@ -621,18 +988,15 @@ export const generateVideo = async (config: VideoGenerationConfig): Promise<stri
         else if (config.model === 'Veo 3.1 Fast') targetModelId = VEO_FAST_MODEL;
 
         if (!targetModelId) {
-            const selectedModels = JSON.parse(localStorage.getItem('setting_video_models') || '[]');
-            const candidates = selectedModels.length > 0 ? selectedModels : [VEO_FAST_MODEL];
+            const candidates = getNormalizedSelectedVideoModels();
             const storageKeyIdx = `service_poll_index_video`;
             let currentIdx = parseInt(localStorage.getItem(storageKeyIdx) || '0', 10);
             if (currentIdx >= candidates.length) currentIdx = 0;
             targetModelId = candidates[currentIdx];
             localStorage.setItem(storageKeyIdx, ((currentIdx + 1) % candidates.length).toString());
-            if (targetModelId === 'Veo 3.1 Pro' || targetModelId === 'Veo 3.1') targetModelId = VEO_PRO_MODEL;
-            else if (targetModelId === 'Veo 3.1 Fast') targetModelId = VEO_FAST_MODEL;
         }
 
-        const modelId = targetModelId || VEO_FAST_MODEL;
+        const modelId = normalizeVideoModelId(targetModelId || VEO_FAST_MODEL);
         const baseUrl = getVideoBaseUrl();
         const apiKey = getApiKey();
         console.log(`[generateVideo] model=${modelId}, baseUrl=${baseUrl}, prompt=${config.prompt.slice(0, 50)}...`);
@@ -670,26 +1034,78 @@ export const generateVideo = async (config: VideoGenerationConfig): Promise<stri
 
         // 3. POST via fetch — uses generateVideos endpoint (not SDK's predictLongRunning)
         const isGoogleDirect = baseUrl.includes('googleapis.com');
-        const authHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-        if (!isGoogleDirect) {
-            authHeaders['Authorization'] = `Bearer ${apiKey}`;
-        }
-
-        const generateUrl = isGoogleDirect
-            ? `${baseUrl}/v1beta/models/${modelId}:generateVideos?key=${apiKey}`
-            : `${baseUrl}/v1beta/models/${modelId}:generateVideos`;
-        console.log(`[generateVideo] POST ${generateUrl.replace(apiKey, '***')}`);
+        const directGoogleUrl = `${baseUrl}/v1beta/models/${modelId}:generateVideos?key=${encodeURIComponent(apiKey)}`;
+        let generateContext: { version: VideoApiVersion; authMode: VideoAuthMode } = { version: 'v1beta', authMode: 'query' };
 
         const genRes = await retryWithBackoff(async () => {
-            const r = await fetch(generateUrl, { method: 'POST', headers: authHeaders, body: JSON.stringify(body) });
-            if (!r.ok) {
-                const errBody = await r.text();
-                const err: any = new Error(`generateVideos ${r.status}: ${errBody}`);
-                err.status = r.status;
-                throw err;
+            if (isGoogleDirect) {
+                console.log(`[generateVideo] POST ${directGoogleUrl.replace(apiKey, '***')}`);
+                const r = await fetch(directGoogleUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                if (!r.ok) {
+                    const errBody = await r.text();
+                    const err: any = new Error(`generateVideos ${r.status}: ${errBody}`);
+                    err.status = r.status;
+                    throw err;
+                }
+                return r.json();
             }
-            return r.json();
+
+            const plans: Array<{ version: VideoApiVersion; authMode: VideoAuthMode }> = [
+                { version: 'v1beta', authMode: 'bearer' },
+                { version: 'v1beta', authMode: 'query' },
+                { version: 'v1', authMode: 'bearer' },
+                { version: 'v1', authMode: 'query' },
+            ];
+
+            let lastError: any = null;
+
+            for (const plan of plans) {
+                try {
+                    const generateUrl = buildVideoGenerateUrl(baseUrl, plan.version, modelId, plan.authMode, apiKey);
+                    const headers = buildVideoHeaders(plan.authMode, apiKey);
+                    console.log(`[generateVideo] POST [${plan.version}/${plan.authMode}] ${generateUrl.replace(apiKey, '***')}`);
+
+                    const r = await fetch(generateUrl, { method: 'POST', headers, body: JSON.stringify(body) });
+                    if (r.ok) {
+                        generateContext = plan;
+                        return r.json();
+                    }
+
+                    const errBody = await r.text();
+                    const err: any = new Error(`generateVideos ${r.status} [${plan.version}/${plan.authMode}]: ${errBody}`);
+                    err.status = r.status;
+                    err.version = plan.version;
+                    err.authMode = plan.authMode;
+                    lastError = err;
+
+                    if (!shouldFallbackVideoAuth(r.status)) {
+                        throw err;
+                    }
+                } catch (networkErr) {
+                    lastError = networkErr;
+                    if (!isNetworkFetchError(networkErr)) {
+                        throw networkErr;
+                    }
+                }
+            }
+
+            console.warn('[generateVideo] Google-style generateVideos failed, trying OpenAI-compatible video endpoint fallback');
+            const openAiUrl = await generateVideoOpenAICompatible(baseUrl, apiKey, modelId, config);
+            if (openAiUrl) {
+                return { __openaiVideoUrl: openAiUrl } as any;
+            }
+
+            throw lastError || new Error('generateVideos failed on all auth/version strategies');
         });
+
+        const openAiDirectUrl = (genRes as any)?.__openaiVideoUrl;
+        if (openAiDirectUrl) {
+            return openAiDirectUrl;
+        }
 
         const operationName = genRes.name;
         if (!operationName) {
@@ -705,13 +1121,43 @@ export const generateVideo = async (config: VideoGenerationConfig): Promise<stri
             await new Promise(resolve => setTimeout(resolve, 5000));
             pollCount++;
 
-            const pollUrl = isGoogleDirect
-                ? `${baseUrl}/v1beta/${operationName}?key=${apiKey}`
-                : `${baseUrl}/v1beta/${operationName}`;
+            const pollPlans: Array<{ version: VideoApiVersion; authMode: VideoAuthMode }> = isGoogleDirect
+                ? [{ version: 'v1beta', authMode: 'query' }]
+                : [
+                    generateContext,
+                    { version: 'v1beta', authMode: 'bearer' },
+                    { version: 'v1beta', authMode: 'query' },
+                    { version: 'v1', authMode: 'bearer' },
+                    { version: 'v1', authMode: 'query' },
+                ];
+
+            let pollData: any = null;
+            let lastPollError: any = null;
 
             try {
-                const pollRes = await fetch(pollUrl, { headers: authHeaders });
-                const pollData = await pollRes.json();
+                for (const plan of pollPlans) {
+                    const pollUrl = buildVideoPollUrl(baseUrl, plan.version, operationName, plan.authMode, apiKey);
+                    const pollHeaders = buildVideoHeaders(plan.authMode, apiKey);
+                    const pollRes = await fetch(pollUrl, { headers: pollHeaders });
+
+                    if (!pollRes.ok) {
+                        const errBody = await pollRes.text().catch(() => '');
+                        const err: any = new Error(`poll ${pollRes.status} [${plan.version}/${plan.authMode}]: ${errBody}`);
+                        err.status = pollRes.status;
+                        lastPollError = err;
+                        if (shouldFallbackVideoAuth(pollRes.status)) continue;
+                        break;
+                    }
+
+                    pollData = await pollRes.json();
+                    break;
+                }
+
+                if (!pollData) {
+                    if (lastPollError) throw lastPollError;
+                    throw new Error('轮询失败：无可用响应');
+                }
+
                 console.log(`[generateVideo] Poll #${pollCount}: done=${pollData.done}`);
 
                 if (pollData.done) {
@@ -721,7 +1167,10 @@ export const generateVideo = async (config: VideoGenerationConfig): Promise<stri
                     const uri = pollData.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri
                         || pollData.response?.generatedVideos?.[0]?.video?.uri;
                     if (uri) {
-                        return `${uri}${uri.includes('?') ? '&' : '?'}key=${apiKey}`;
+                        if (isGoogleDirect) {
+                            return `${uri}${uri.includes('?') ? '&' : '?'}key=${encodeURIComponent(apiKey)}`;
+                        }
+                        return uri;
                     }
                     throw new Error(`未获取到视频资源: ${JSON.stringify(pollData.response || pollData).slice(0, 300)}`);
                 }
@@ -735,14 +1184,52 @@ export const generateVideo = async (config: VideoGenerationConfig): Promise<stri
 
     } catch (error: any) {
         console.error("Video Generation Detailed Error:", error);
+        const status = extractStatusCode(error);
         const msg = (error.message || '').toLowerCase();
         if (msg.includes('requested entity was not found')) {
-            throw new Error("模型无法在当前节点找到，请检查设置中的模型映射。");
+            throw new ProviderError({
+                provider: getProviderConfig().id || 'unknown',
+                code: 'MODEL_NOT_FOUND',
+                status,
+                retryable: false,
+                stage: 'modelResolve',
+                details: error?.message,
+                message: "模型无法在当前节点找到，请检查设置中的模型映射。"
+            });
         } else if (msg.includes('503') || msg.includes('overloaded') || msg.includes('unavailable')) {
-            throw new Error("服务商节点当前过载 (503)，请稍后重试或切换 API 节点。");
+            throw new ProviderError({
+                provider: getProviderConfig().id || 'unknown',
+                code: 'PROVIDER_OVERLOADED',
+                status: status || 503,
+                retryable: true,
+                stage: 'generateRequest',
+                details: error?.message,
+                message: "服务商节点当前过载 (503)，请稍后重试或切换 API 节点。"
+            });
         } else if (msg.includes('403') || msg.includes('permission') || msg.includes('401')) {
-            throw new Error("API 密钥权限不足或已失效，请检查设置。");
+            throw new ProviderError({
+                provider: getProviderConfig().id || 'unknown',
+                code: 'AUTH_FAILED',
+                status: status || 401,
+                retryable: false,
+                stage: 'generateRequest',
+                details: error?.message,
+                message: "API 密钥权限不足或已失效，请检查设置。"
+            });
         }
-        throw error;
+
+        if (error instanceof ProviderError) {
+            throw error;
+        }
+
+        throw new ProviderError({
+            provider: getProviderConfig().id || 'unknown',
+            code: 'VIDEO_GENERATION_FAILED',
+            status,
+            retryable: status === 429 || status === 500 || status === 503,
+            stage: 'unknown',
+            details: error?.message,
+            message: error?.message || '视频生成失败，请稍后重试。'
+        });
     }
 }

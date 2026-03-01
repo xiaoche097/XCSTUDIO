@@ -145,6 +145,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
     showVideoSettingsDropdown, setShowVideoSettingsDropdown,
     markers,
 }) => {
+    const [showImageUploadMenu, setShowImageUploadMenu] = useState(false);
     const inputBlocks = useAgentStore(s => s.inputBlocks);
     const activeBlockId = useAgentStore(s => s.activeBlockId);
     const videoGenRatio = useAgentStore(s => s.videoGenRatio);
@@ -157,6 +158,8 @@ export const InputArea: React.FC<InputAreaProps> = ({
     const showVideoModelDropdown = useAgentStore(s => s.showVideoModelDropdown);
     const modelMode = useAgentStore(s => s.modelMode);
     const webEnabled = useAgentStore(s => s.webEnabled);
+    const imageGenUpload = useAgentStore(s => s.imageGenUpload);
+    const isPickingFromCanvas = useAgentStore(s => s.isPickingFromCanvas);
 
     const {
         setInputBlocks, removeInputBlock, insertInputFile,
@@ -164,16 +167,26 @@ export const InputArea: React.FC<InputAreaProps> = ({
         setVideoGenRatio, setVideoGenDuration, setVideoGenModel, setVideoGenMode,
         setVideoStartFrame, setVideoEndFrame, setVideoMultiRefs,
         setShowVideoModelDropdown, setWebEnabled, setIsAgentMode,
+        setImageGenUpload, setIsPickingFromCanvas,
     } = useAgentStore(s => s.actions);
 
     const imageGenRatio = useAgentStore(s => s.imageGenRatio);
     const imageGenRes = useAgentStore(s => s.imageGenRes);
     const { setImageGenRatio, setImageGenRes } = useAgentStore(s => s.actions);
 
+    const selectLatestCanvasChip = () => {
+        if (selectedChipId) return;
+        const autoCanvasBlocks = inputBlocks.filter(b => b.type === 'file' && b.file && (b.file as any)._canvasAutoInsert);
+        const lastAutoBlock = autoCanvasBlocks[autoCanvasBlocks.length - 1];
+        if (lastAutoBlock) {
+            setSelectedChipId(lastAutoBlock.id);
+        }
+    };
+
     return (
         <div className="px-2 pb-2 pt-0.5 z-20">
             <div
-                className={`bg-white rounded-2xl border shadow-sm transition-all duration-200 relative group focus-within:shadow-md focus-within:border-gray-300 flex flex-col ${isDragOver ? 'border-blue-400 ring-2 ring-blue-100 bg-blue-50/30' : 'border-gray-200'}`}
+                className={`bg-white rounded-2xl border shadow-sm transition-all duration-200 relative group focus-within:shadow-md focus-within:border-gray-300 flex flex-col overflow-visible ${isDragOver ? 'border-blue-400 ring-2 ring-blue-100 bg-blue-50/30' : 'border-gray-200'}`}
                 onMouseEnter={() => setIsVideoPanelHovered(true)}
                 onMouseLeave={() => setIsVideoPanelHovered(false)}
                 onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(true); }}
@@ -203,22 +216,67 @@ export const InputArea: React.FC<InputAreaProps> = ({
 
                 {/* Image Mode: Upload Area */}
                 {creationMode === 'image' && (
-                    <div className={`transition-all duration-300 overflow-hidden px-4 flex flex-col justify-end`} style={{ maxHeight: isVideoPanelHovered ? '92px' : '0px', opacity: isVideoPanelHovered ? 1 : 0, paddingTop: isVideoPanelHovered ? '16px' : '0px', paddingBottom: isVideoPanelHovered ? '4px' : '0px' }}>
-                        <div
-                            onClick={() => {
-                                const input = document.createElement('input');
-                                input.type = 'file';
-                                input.accept = 'image/*';
-                                input.onchange = (e) => {
-                                    const file = (e.target as HTMLInputElement).files?.[0];
-                                    if (file) insertInputFile(file);
-                                };
-                                input.click();
-                            }}
-                            className="w-[72px] h-[72px] border border-dashed border-gray-200 rounded-[14px] flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/30 transition group/upload shrink-0 bg-gray-50/50"
-                        >
-                            <Plus size={20} strokeWidth={1.5} className="text-gray-300 group-hover/upload:text-blue-500 transition mb-1" />
-                            <span className="text-[12px] font-bold text-gray-400 group-hover/upload:text-blue-500 transition">图片</span>
+                    <div className="transition-all duration-300 overflow-visible px-4 flex flex-col justify-end" style={{ maxHeight: isVideoPanelHovered ? '92px' : '0px', opacity: isVideoPanelHovered ? 1 : 0, paddingTop: isVideoPanelHovered ? '16px' : '0px', paddingBottom: isVideoPanelHovered ? '4px' : '0px' }}>
+                        <div className="flex items-center gap-3">
+                            <div className="relative shrink-0">
+                                <div
+                                    onClick={() => setShowImageUploadMenu(v => !v)}
+                                    className={`w-[72px] h-[72px] border border-dashed border-gray-200 rounded-[14px] flex flex-col items-center justify-center cursor-pointer hover:border-blue-400 hover:bg-blue-50/30 transition group/upload bg-gray-50/50 ${isPickingFromCanvas ? 'border-blue-400 bg-blue-50/40' : ''}`}
+                                >
+                                    <Plus size={20} strokeWidth={1.5} className="text-gray-300 group-hover/upload:text-blue-500 transition mb-1" />
+                                    <span className="text-[12px] font-bold text-gray-400 group-hover/upload:text-blue-500 transition">图片</span>
+                                </div>
+
+                                {showImageUploadMenu && (
+                                    <div className="absolute bottom-full right-0 mb-2 w-32 bg-white rounded-xl shadow-xl border border-gray-200 py-1.5 z-[80]">
+                                        <button
+                                            onClick={() => {
+                                                const input = document.createElement('input');
+                                                input.type = 'file';
+                                                input.accept = 'image/*';
+                                                input.onchange = (e) => {
+                                                    const file = (e.target as HTMLInputElement).files?.[0];
+                                                    if (file) {
+                                                        setImageGenUpload(file);
+                                                    }
+                                                };
+                                                input.click();
+                                                setShowImageUploadMenu(false);
+                                            }}
+                                            className="w-full px-3 py-2 text-left text-[12px] text-gray-700 hover:bg-gray-50 transition"
+                                        >
+                                            上传图片
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                setIsPickingFromCanvas(true);
+                                                setShowImageUploadMenu(false);
+                                            }}
+                                            className="w-full px-3 py-2 text-left text-[12px] text-gray-700 hover:bg-gray-50 transition"
+                                        >
+                                            从画布选择
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+
+                            {imageGenUpload && (
+                                <div className="relative w-[72px] h-[72px] border border-gray-200 rounded-[14px] overflow-visible shadow-sm shrink-0 bg-white">
+                                    <img src={URL.createObjectURL(imageGenUpload)} className="w-full h-full object-cover rounded-[14px]" />
+                                    <button
+                                        onClick={(e) => { e.stopPropagation(); setImageGenUpload(null); setIsPickingFromCanvas(false); }}
+                                        className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-black/80 hover:bg-black text-white rounded-full flex items-center justify-center z-10 shadow-sm border border-white/20"
+                                    >
+                                        <X size={10} />
+                                    </button>
+                                </div>
+                            )}
+
+                            {isPickingFromCanvas && (
+                                <div className="text-[11px] text-blue-600 font-medium bg-blue-50 border border-blue-200 rounded-lg px-2 py-1">
+                                    请在画布中点击一张图片
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}
@@ -295,7 +353,14 @@ export const InputArea: React.FC<InputAreaProps> = ({
                 )}
 
                 {/* Text Input Area - Lovart style: inline mixed chips + text */}
-                <div className={`px-3 pt-2 pb-4 cursor-text transition-all`} onClick={(e) => {
+                <div
+                    className={`px-3 pt-2 pb-4 cursor-text transition-all`}
+                    onMouseDown={(e) => {
+                        const target = e.target as HTMLElement;
+                        if (target.closest('[id^="file-chip-"]') || target.closest('[id^="marker-chip-"]')) return;
+                        selectLatestCanvasChip();
+                    }}
+                    onClick={(e) => {
                     if (e.target === e.currentTarget || (e.target as HTMLElement).closest('.input-flow-container') === e.currentTarget.querySelector('.input-flow-container')) {
                         const lastText = inputBlocks.filter(b => b.type === 'text').pop();
                         const targetId = lastText?.id || inputBlocks[inputBlocks.length - 1].id;
@@ -409,13 +474,51 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                 } else {
                                     const isCanvasAuto = (file as any)._canvasAutoInsert;
                                     const chipLabel = isCanvasAuto ? `图片${inputBlocks.filter(b => b.type === 'file' && (b.file as any)?._canvasAutoInsert).indexOf(block) + 1}` : file.name.replace(/\.[^/.]+$/, '');
+                                    const fileAny = file as any;
+                                    const imageWidth = Number(fileAny._canvasWidth || fileAny._canvasW || 0);
+                                    const imageHeight = Number(fileAny._canvasHeight || fileAny._canvasH || 0);
+                                    const hasValidAspect = imageWidth > 0 && imageHeight > 0;
                                     return (
-                                        <div key={block.id} className={`inline-flex items-center gap-1 rounded-full pl-[2px] pr-1.5 select-none relative group h-6 cursor-default transition-all border shrink-0 ${isSelected ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-400' : isInputFocused ? 'bg-blue-50/30 border-blue-100' : 'bg-gray-50/50 border-gray-100 hover:bg-gray-100'}`} onClick={(e) => { e.stopPropagation(); setSelectedChipId(isSelected ? null : block.id); }}>
+                                        <div
+                                            key={block.id}
+                                            id={`file-chip-${block.id}`}
+                                            className={`inline-flex items-center gap-1 rounded-full pl-[2px] pr-1.5 select-none relative group h-6 cursor-default transition-all border shrink-0 ${isSelected ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-400' : isInputFocused ? 'bg-blue-50/30 border-blue-100' : 'bg-gray-50/50 border-gray-100 hover:bg-gray-100'}`}
+                                            onClick={(e) => { e.stopPropagation(); setSelectedChipId(isSelected ? null : block.id); }}
+                                            onMouseEnter={() => setHoveredChipId(block.id)}
+                                            onMouseLeave={() => setHoveredChipId(null)}
+                                        >
                                             <div className="w-5 h-5 rounded-full overflow-hidden flex-shrink-0 border border-gray-100 shadow-sm">
                                                 {file.type.startsWith('image/') ? <img src={URL.createObjectURL(file)} className="w-full h-full object-cover" /> : <FileText size={10} className="text-gray-500" />}
                                             </div>
                                             <span className="text-[11px] text-gray-700 font-bold max-w-[100px] truncate ml-0.5">{chipLabel}</span>
                                             <button onClick={(e) => { e.stopPropagation(); removeInputBlock(block.id); setSelectedChipId(null); }} className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 transition opacity-0 group-hover:opacity-100 ml-0.5"><X size={10} /></button>
+
+                                            {isHovered && isSelected && file.type.startsWith('image/') && (() => {
+                                                const MAX_SIZE = 220;
+                                                const ratio = hasValidAspect ? (imageWidth / imageHeight) : 1;
+                                                let renderWidth = MAX_SIZE;
+                                                let renderHeight = MAX_SIZE;
+
+                                                if (ratio > 1) {
+                                                    renderHeight = MAX_SIZE / ratio;
+                                                } else {
+                                                    renderWidth = MAX_SIZE * ratio;
+                                                }
+
+                                                const chipRect = document.getElementById(`file-chip-${block.id}`)?.getBoundingClientRect();
+                                                const left = (chipRect?.left || 0) + (chipRect?.width || 0) / 2 - (renderWidth / 2);
+                                                const top = (chipRect?.top || 0) - renderHeight - 12;
+
+                                                return ReactDOM.createPortal(
+                                                    <div
+                                                        className="fixed z-[9999] pointer-events-none bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden"
+                                                        style={{ left, top, width: renderWidth, height: renderHeight }}
+                                                    >
+                                                        <img src={URL.createObjectURL(file)} className="w-full h-full object-contain bg-white" />
+                                                    </div>,
+                                                    document.body
+                                                );
+                                            })()}
                                         </div>
                                     );
                                 }
@@ -546,7 +649,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                 </div>
 
                 {/* Bottom Toolbar */}
-                <div className="px-2 pb-2.5 pt-0 flex items-center justify-between">
+                <div className="px-2 pb-2.5 pt-0 flex items-center justify-between relative">
                     <div className="flex items-center gap-1">
                         {creationMode === 'agent' && (
                             <button onClick={() => fileInputRef.current?.click()} className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition">
@@ -582,7 +685,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                         <ChevronDown size={14} className={`text-gray-400 transition-transform duration-300 ${showRatioPicker ? 'rotate-180' : ''}`} />
                                     </button>
                                     {showRatioPicker && (
-                                        <div className="absolute bottom-full left-0 mb-3 w-[260px] bg-white rounded-[24px] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.15)] border border-gray-100 p-5 z-50 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                                        <div className="absolute bottom-full right-0 mb-3 w-[260px] bg-white rounded-[24px] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.15)] border border-gray-100 p-5 z-[70] animate-in fade-in slide-in-from-bottom-2 duration-300">
                                             <div className="text-[12px] text-gray-400 font-bold uppercase tracking-widest mb-4">分辨率</div>
                                             <div className="flex gap-2 mb-6">
                                                 {['1K', '2K', '4K'].map(res => (
@@ -639,8 +742,8 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                 </div>
 
                                 <button
-                                    onClick={() => handleSend()}
-                                    disabled={inputBlocks.every(b => (b.type === 'text' && !b.text) || (b.type === 'file' && !b.file))}
+                                    onClick={() => handleSend(undefined, imageGenUpload ? [imageGenUpload] : [])}
+                                    disabled={!imageGenUpload && inputBlocks.every(b => (b.type === 'text' && !b.text) || (b.type === 'file' && !b.file))}
                                     className="h-9 px-4 rounded-full flex items-center justify-center text-[14px] font-bold shadow-sm transition bg-gradient-to-b from-gray-100 to-gray-200 text-gray-500 border border-gray-200 hover:from-gray-200 hover:to-gray-300 disabled:opacity-50"
                                 >
                                     发送
@@ -659,7 +762,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                         <ChevronDown size={14} className={`text-gray-400 transition-transform duration-300 ${showVideoSettingsDropdown ? 'rotate-180' : ''}`} />
                                     </button>
                                     {showVideoSettingsDropdown && (
-                                        <div className="absolute bottom-full left-0 mb-3 w-[300px] bg-white rounded-[24px] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.15)] border border-gray-100 p-5 z-50 animate-in fade-in slide-in-from-bottom-2 duration-300 flex flex-col gap-5">
+                                        <div className="absolute bottom-full right-0 mb-3 w-[300px] bg-white rounded-[24px] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.15)] border border-gray-100 p-5 z-[70] animate-in fade-in slide-in-from-bottom-2 duration-300 flex flex-col gap-5">
                                             {/* Generate Method */}
                                             <div className="flex flex-col gap-2.5">
                                                 <div className="text-[13px] text-gray-500 font-bold">Generate method</div>
@@ -884,9 +987,14 @@ export const InputArea: React.FC<InputAreaProps> = ({
                 className="hidden"
                 onChange={(e) => {
                     if (e.target.files) {
-                        Array.from(e.target.files).forEach((f: File) => {
-                            insertInputFile(f);
-                        });
+                        if (creationMode === 'image') {
+                            const firstImage = Array.from(e.target.files).find((f: File) => f.type.startsWith('image/')) || null;
+                            setImageGenUpload(firstImage);
+                        } else {
+                            Array.from(e.target.files).forEach((f: File) => {
+                                insertInputFile(f);
+                            });
+                        }
                     }
                     if (fileInputRef.current) {
                         fileInputRef.current.value = '';

@@ -14,10 +14,20 @@ export interface VideoGenerationRequest {
   referenceImages?: string[];
 }
 
+export type ProviderAuthMode = 'bearer' | 'apiKeyQuery' | 'both';
+export type ProviderApiStyle = 'google' | 'openai' | 'custom';
+
+export interface ProviderCapability {
+  authMode: ProviderAuthMode;
+  apiStyle: ProviderApiStyle;
+  supports: Array<'modelList' | 'chat' | 'image' | 'video'>;
+}
+
 export interface ImageProvider {
   id: string;
   name: string;
   models: string[];
+  capability: ProviderCapability;
   generateImage(request: ImageGenerationRequest, model: string): Promise<string | null>;
 }
 
@@ -25,6 +35,7 @@ export interface VideoProvider {
   id: string;
   name: string;
   models: string[];
+  capability: ProviderCapability;
   generateVideo(request: VideoGenerationRequest, model: string): Promise<string | null>;
 }
 

@@ -74,8 +74,12 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({ message, onPreview, 
 
                 {/* 1. 引导文字 */}
                 {cleanText && (
-                    <div className="text-[13px] text-gray-800 leading-normal font-normal px-1 whitespace-pre-wrap">
-                        {cleanText}
+                    <div className="agent-msg-text text-[13px] text-gray-800 leading-[1.6] font-normal px-1 whitespace-pre-wrap break-words">
+                        {cleanText.split(/\n{2,}/).map((paragraph, idx) => (
+                            <p key={idx} className="mb-2 last:mb-0 whitespace-pre-wrap">
+                                {paragraph}
+                            </p>
+                        ))}
                     </div>
                 )}
 
@@ -89,7 +93,7 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({ message, onPreview, 
                                 style={{ width: agentData.imageUrls!.length > 1 ? '140px' : '220px', aspectRatio: '1/1' }}
                                 onClick={() => onPreview(url)}
                             >
-                                <img src={url} alt="Generated" className="w-full h-full object-cover transition-transform group-hover/img:scale-105" />
+                                <img src={url} alt="Generated" className="w-full h-full max-w-full max-h-[300px] object-contain transition-transform group-hover/img:scale-105" />
                                 <div className="absolute inset-0 bg-black/0 group-hover/img:bg-black/5 transition-colors" />
                             </div>
                         ))}
@@ -161,7 +165,16 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({ message, onPreview, 
                                     {prop.description}
                                 </p>
                                 <button
-                                    onClick={() => onSmartGenerate?.(prop.prompt)}
+                                    onClick={() => {
+                                        const prompt =
+                                            prop.prompt ||
+                                            prop.skillCalls?.[0]?.params?.prompt ||
+                                            prop.skillCalls?.find((s: any) => s?.skillName === 'generateImage')?.params?.prompt ||
+                                            '';
+                                        if (prompt) {
+                                            onSmartGenerate?.(prompt);
+                                        }
+                                    }}
                                     className="w-full py-1.5 bg-gray-900 hover:bg-black text-white rounded-md text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-all active:scale-[0.98] shadow-sm"
                                 >
                                     <Wand2 size={11} strokeWidth={2.5} />
@@ -199,7 +212,7 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({ message, onPreview, 
                                 <img 
                                     src={agentData.imageUrls[0]} 
                                     alt="Generated"
-                                    className="w-full h-auto object-contain cursor-zoom-in hover:opacity-95 transition"
+                                    className="w-full max-w-full h-auto max-h-[300px] object-contain cursor-zoom-in hover:opacity-95 transition"
                                     onClick={() => onPreview(agentData.imageUrls![0])}
                                 />
                             </div>
@@ -209,7 +222,7 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({ message, onPreview, 
                                     <div key={i} className="relative aspect-square rounded-lg overflow-hidden border border-gray-100 bg-gray-50">
                                         <img 
                                             src={url} 
-                                            className="w-full h-full object-cover cursor-zoom-in hover:opacity-95 transition"
+                                            className="w-full h-full max-w-full max-h-[300px] object-contain cursor-zoom-in hover:opacity-95 transition"
                                             onClick={() => onPreview(url)}
                                         />
                                     </div>

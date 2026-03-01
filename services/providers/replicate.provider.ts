@@ -43,6 +43,11 @@ export const replicateImageProvider: ImageProvider = {
   id: 'replicate',
   name: 'Replicate',
   models: ['Flux Schnell', 'SDXL'],
+  capability: {
+    authMode: 'bearer',
+    apiStyle: 'custom',
+    supports: ['image'],
+  },
 
   async generateImage(request: ImageGenerationRequest, model: string): Promise<string | null> {
     const apiKey = getReplicateKey();

@@ -322,7 +322,7 @@ const Workspace: React.FC = () => {
         setMessages, addMessage, clearMessages,
         setInputBlocks, setActiveBlockId, setSelectionIndex,
         setIsTyping, setModelMode, setWebEnabled, setImageModelEnabled,
-        setImageGenRatio, setImageGenRes, setImageGenUpload,
+        setImageGenRatio, setImageGenRes, setImageGenUpload, setIsPickingFromCanvas,
         setVideoGenRatio, setVideoGenDuration, setVideoGenQuality,
         setVideoGenModel, setVideoGenMode, setVideoStartFrame, setVideoEndFrame,
         setVideoMultiRefs, setShowVideoModelDropdown,
@@ -348,6 +348,7 @@ const Workspace: React.FC = () => {
     const imageGenRatio = useAgentStore(s => s.imageGenRatio);
     const imageGenRes = useAgentStore(s => s.imageGenRes);
     const imageGenUpload = useAgentStore(s => s.imageGenUpload);
+    const isPickingFromCanvas = useAgentStore(s => s.isPickingFromCanvas);
 
     // 视频生成器相关状态 (from store)
     const videoGenRatio = useAgentStore(s => s.videoGenRatio);
@@ -426,10 +427,15 @@ const Workspace: React.FC = () => {
         setPendingModelMode(null);
     };
 
-    // 全局点击解选逻辑 (针对画布空白区域) - 使用捕获阶段确保万无一失
+    // 全局点击解选逻辑：仅点击画布空白时才解选
     useEffect(() => {
         const handleGlobalMouseDown = (e: MouseEvent) => {
             const target = e.target as HTMLElement;
+
+            // 只处理画布容器内点击；输入框/技能区/侧栏点击不应触发解选
+            if (!containerRef.current?.contains(target)) {
+                return;
+            }
             
             // 排除所有非画布覆盖层 UI：侧边栏、对话框、各种 Modal、Popovers、输入框、工具栏以及历史记录
             const isSidebar = target.closest('.assistant-sidebar') || target.closest('.right-sidebar');
@@ -445,28 +451,25 @@ const Workspace: React.FC = () => {
                 return;
             }
 
-            const isCanvasElement = target.closest('[id^="canvas-el-"]');
-            const isToolbar = target.closest('.floating-toolbar') || 
-                              target.closest('#active-floating-toolbar') || 
-                              target.closest('.toolbar-container') || 
-                              target.closest('.toolbar');
-            const isMarker = target.closest('.group\\/marker') || target.closest('[id^="marker-"]');
-            
-            // 核心判定：只要不是点击在特定的 UI 或 元素上，就视作“点击空白”
-            if (!isCanvasElement && !isToolbar && !isMarker) {
-                // 如果是中间键或右键，交给 contextMenu 处理
-                if (e.button !== 0) return;
+            const isCanvasBackgroundClick =
+                target === containerRef.current ||
+                target === canvasLayerRef.current ||
+                target.classList.contains('canvas-background');
 
-                // 强制解除所有状态
-                setSelectedElementId(null);
-                setSelectedElementIds([]);
-                setSelectedChipId(null);
-                setEditingTextId(null);
-                setShowFontPicker(false);
-                setShowModelPicker(false);
-                setShowResPicker(false);
-                setShowRatioPicker(false);
-            }
+            if (!isCanvasBackgroundClick) return;
+
+            // 如果是中间键或右键，交给 contextMenu 处理
+            if (e.button !== 0) return;
+
+            // 点击画布空白时，才解除选中与相关浮层
+            setSelectedElementId(null);
+            setSelectedElementIds([]);
+            setSelectedChipId(null);
+            setEditingTextId(null);
+            setShowFontPicker(false);
+            setShowModelPicker(false);
+            setShowResPicker(false);
+            setShowRatioPicker(false);
         };
 
         window.addEventListener('mousedown', handleGlobalMouseDown, true); 
@@ -737,12 +740,30 @@ const Workspace: React.FC = () => {
         });
 
         try {
+            const requestMetadata = {
+                enableWebSearch: isWeb,
+                creationMode,
+                preferredAspectRatio: creationMode === 'video' ? videoGenRatio : imageGenRatio,
+            };
+
             // 4. 调用 Orchestrator 处理任务
             console.log('[Workspace] handleSend: calling processMessage with text:', text.substring(0, 50));
-            const result = await processMessage(text, attachments, undefined, userMsg.id);
+            const result = await processMessage(text, attachments, requestMetadata, userMsg.id);
             console.log('[Workspace] handleSend: processMessage returned:', result?.status, result?.output?.message?.substring(0, 50));
 
             if (result && result.output) {
+                const derivedImageUrls =
+                    (result.output.imageUrls && result.output.imageUrls.length > 0)
+                        ? result.output.imageUrls
+                        : [
+                            ...(result.output.assets || [])
+                                .filter((a: any) => a?.type === 'image' && a?.url)
+                                .map((a: any) => a.url),
+                            ...(result.output.skillCalls || [])
+                                .filter((s: any) => s?.success && typeof s?.result === 'string')
+                                .map((s: any) => s.result),
+                        ];
+
                 // 5. 构造并添加 Agent 消息
                 const agentMsg: ChatMessage = {
                     id: result.id,
@@ -752,7 +773,7 @@ const Workspace: React.FC = () => {
                     agentData: {
                         model: result.agentId,
                         title: '智能助理',
-                        imageUrls: result.output.imageUrls || [],
+                        imageUrls: Array.from(new Set(derivedImageUrls)),
                         analysis: result.output.analysis,
                         suggestions: result.output.adjustments || [],
                     }
@@ -885,6 +906,8 @@ const Workspace: React.FC = () => {
                     const file = new File([blob], `canvas-${el.id.slice(-6)}.png`, { type: blob.type || 'image/png' }) as any;
                     file._canvasAutoInsert = true;
                     file._canvasElId = el.id;
+                    file._canvasWidth = el.width;
+                    file._canvasHeight = el.height;
                     insertInputFile(file);
                 } catch (_) { /* ignore */ }
             }
@@ -2357,6 +2380,26 @@ const Workspace: React.FC = () => {
 
     const handleElementMouseDown = async (e: React.MouseEvent, id: string) => {
         if (isSpacePressed || activeTool === 'hand') return;
+
+        // 图像模式：从画布选择参考图（不影响 Agent 模式输入链路）
+        if (creationMode === 'image' && isPickingFromCanvas) {
+            const pickedEl = elements.find(el => el.id === id);
+            if (pickedEl && (pickedEl.type === 'image' || pickedEl.type === 'gen-image') && pickedEl.url) {
+                e.stopPropagation();
+                e.preventDefault();
+                try {
+                    const resp = await fetch(pickedEl.url);
+                    const blob = await resp.blob();
+                    const file = new File([blob], `canvas-ref-${pickedEl.id.slice(-6)}.png`, { type: blob.type || 'image/png' });
+                    setImageGenUpload(file);
+                } catch (err) {
+                    console.warn('Pick image from canvas failed:', err);
+                } finally {
+                    setIsPickingFromCanvas(false);
+                }
+                return;
+            }
+        }
 
         // Locked element protection
         const elObj = elements.find(el => el.id === id);
@@ -3948,7 +3991,11 @@ const Workspace: React.FC = () => {
                     onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }} 
                     onDrop={handleCanvasDrop} 
                     style={{ 
-                        cursor: (isCtrlPressed || activeTool === 'mark') ? 'none' : ((activeTool === 'hand' || isPanning || isSpacePressed) ? (isPanning ? 'grabbing' : 'grab') : 'default'), 
+                        cursor: (creationMode === 'image' && isPickingFromCanvas)
+                            ? 'crosshair'
+                            : (isCtrlPressed || activeTool === 'mark')
+                                ? 'none'
+                                : ((activeTool === 'hand' || isPanning || isSpacePressed) ? (isPanning ? 'grabbing' : 'grab') : 'default'), 
                         WebkitUserSelect: 'none' 
                     }}
                 >

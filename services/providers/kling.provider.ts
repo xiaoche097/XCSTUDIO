@@ -15,6 +15,11 @@ export const klingVideoProvider: VideoProvider = {
   id: 'kling',
   name: '可灵 AI',
   models: ['Kling Standard', 'Kling Pro', 'Kling 2.0', 'Kling 2.6'],
+  capability: {
+    authMode: 'bearer',
+    apiStyle: 'openai',
+    supports: ['video'],
+  },
 
   async generateVideo(request: VideoGenerationRequest, model: string): Promise<string | null> {
     const apiKey = getKlingKey();

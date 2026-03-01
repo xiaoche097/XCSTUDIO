@@ -9,28 +9,19 @@ import {
 } from 'lucide-react';
 import { SettingsCard } from '../components/Settings/SettingsCard';
 import { SettingsControl, SettingsToggle, SettingsInput, SettingsSelect } from '../components/Settings/SettingsControl';
-import { fetchAvailableModels } from '../services/gemini';
 import { useImageHostStore } from '../stores/imageHost.store';
 import Sidebar from '../components/Sidebar';
+import {
+    ApiProviderConfig,
+    ModelInfo,
+    getDefaultProviders,
+    loadProviderSettings,
+    saveProviderSettings,
+    refreshProviderModels,
+} from '../services/provider-settings';
 
 type ApiProvider = 'gemini' | 'yunwu' | 'custom';
 type SettingsTab = 'api' | 'mapping' | 'hosting' | 'advanced' | 'storage' | 'about';
-
-interface ModelInfo {
-    id: string;
-    name: string;
-    brand?: 'Google' | 'OpenAI' | 'Anthropic' | 'DeepSeek' | 'Volcengine' | 'Bailian' | 'ChatGLM' | 'Wenxin' | 'Minimax' | 'Grok' | 'Moonshot' | 'Flux' | 'Ideogram' | 'Fal' | 'Replicate' | 'Midjourney' | 'Other'; /* cspell:disable-line */
-    category: 'script' | 'image' | 'video';
-    provider?: string;
-}
-
-interface ApiProviderConfig {
-    id: string;
-    name: string;
-    baseUrl: string;
-    apiKey: string;
-    isCustom?: boolean;
-}
 
 const DEFAULT_MODEL_WHITELIST = [
     // 图片模型
@@ -108,10 +99,7 @@ ModelCard.displayName = 'ModelCard';
 const SettingsPage: React.FC = () => {
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState<SettingsTab>('api');
-    const [providers, setProviders] = useState<ApiProviderConfig[]>([
-        { id: 'gemini', name: 'Gemini (原生)', baseUrl: 'https://generativelanguage.googleapis.com', apiKey: '' },
-        { id: 'yunwu', name: '云雾 (OpenAI)', baseUrl: 'https://yunwu.ai', apiKey: '' }
-    ]);
+    const [providers, setProviders] = useState<ApiProviderConfig[]>(getDefaultProviders());
     const [activeProviderId, setActiveProviderId] = useState('gemini');
 
     const [replicateKey, setReplicateKey] = useState('');
@@ -145,34 +133,18 @@ const SettingsPage: React.FC = () => {
     const imageHost = useImageHostStore();
 
     useEffect(() => {
-        const savedProviders = localStorage.getItem('api_providers');
-        if (savedProviders) {
-            try {
-                setProviders(JSON.parse(savedProviders));
-            } catch (e) {
-                console.error("Parse error", e);
-            }
-        } else {
-            const geminiKey = localStorage.getItem('gemini_api_key') || '';
-            const yunwuKey = localStorage.getItem('yunwu_api_key') || '';
-            setProviders([
-                { id: 'gemini', name: 'Gemini (原生)', baseUrl: 'https://generativelanguage.googleapis.com', apiKey: geminiKey },
-                { id: 'yunwu', name: '云雾 (OpenAI)', baseUrl: 'https://yunwu.ai', apiKey: yunwuKey }
-            ]);
-        }
-
-        setActiveProviderId(localStorage.getItem('api_provider') || 'gemini');
-        setReplicateKey(localStorage.getItem('replicate_api_key') || '');
-        setKlingKey(localStorage.getItem('kling_api_key') || '');
-
-        setSelectedScriptModels(JSON.parse(localStorage.getItem('setting_script_models') || '["gemini-1.5-flash"]'));
-        setSelectedImageModels(JSON.parse(localStorage.getItem('setting_image_models') || '["gemini-1.5-flash-image-preview"]'));
-        setSelectedVideoModels(JSON.parse(localStorage.getItem('setting_video_models') || '["veo-3.1-fast"]'));
-
-        setVisualContinuity(localStorage.getItem('setting_visual_continuity') !== 'false');
-        setSystemModeration(localStorage.getItem('setting_system_moderation') === 'true');
-        setAutoSave(localStorage.getItem('setting_auto_save') !== 'false');
-        setConcurrentCount(parseInt(localStorage.getItem('setting_concurrent_count') || '1', 10));
+        const loaded = loadProviderSettings();
+        setProviders(loaded.providers);
+        setActiveProviderId(loaded.activeProviderId);
+        setReplicateKey(loaded.replicateKey);
+        setKlingKey(loaded.klingKey);
+        setSelectedScriptModels(loaded.selectedScriptModels);
+        setSelectedImageModels(loaded.selectedImageModels);
+        setSelectedVideoModels(loaded.selectedVideoModels);
+        setVisualContinuity(loaded.visualContinuity);
+        setSystemModeration(loaded.systemModeration);
+        setAutoSave(loaded.autoSave);
+        setConcurrentCount(loaded.concurrentCount);
 
         setSaveStatus('idle');
     }, []);
@@ -187,46 +159,7 @@ const SettingsPage: React.FC = () => {
 
     const handleRefreshModels = async (providerId: string) => {
         setIsLoadingModels(true);
-        const p = providers.find(p => p.id === providerId);
-        if (!p) {
-            setIsLoadingModels(false);
-            return;
-        }
-
-        const keys = p.apiKey.split('\n').map(k => k.trim()).filter(Boolean);
-        if (keys.length === 0) {
-            setAvailableModels([]);
-            setIsLoadingModels(false);
-            return;
-        }
-
-        const models = await fetchAvailableModels(providerId, keys, p.baseUrl);
-
-        const formattedModels = (models || []).map((id: string) => {
-            let brand: ModelInfo['brand'] = 'Other';
-            const lowerId = id.toLowerCase();
-            if (lowerId.includes('gemini') || lowerId.includes('goog') || lowerId.includes('veo') || lowerId.includes('imagen')) brand = 'Google'; /* cspell:disable-line */
-            else if (lowerId.includes('gpt') || lowerId.includes('o1-') || lowerId.includes('o3-')) brand = 'OpenAI';
-            else if (lowerId.includes('claude')) brand = 'Anthropic';
-            else if (lowerId.includes('deepseek')) brand = 'DeepSeek'; /* cspell:disable-line */
-            else if (lowerId.includes('doubao') || lowerId.includes('volc')) brand = 'Volcengine'; /* cspell:disable-line */
-            else if (lowerId.includes('qw')) brand = 'Bailian'; /* cspell:disable-line */
-            else if (lowerId.includes('glm')) brand = 'ChatGLM';
-            else if (lowerId.includes('ernie')) brand = 'Wenxin'; /* cspell:disable-line */
-            else if (lowerId.includes('grok')) brand = 'Grok';
-            else if (lowerId.includes('moonshot')) brand = 'Moonshot';
-            else if (lowerId.includes('flux')) brand = 'Flux';
-            else if (lowerId.includes('ideogram')) brand = 'Ideogram';
-            else if (lowerId.includes('fal')) brand = 'Fal';
-            else if (lowerId.includes('replicate')) brand = 'Replicate';
-            else if (lowerId.includes('midjourney')) brand = 'Midjourney';
-
-            let category: 'script' | 'image' | 'video' = 'script';
-            if (lowerId.includes('vision') || lowerId.includes('dall-e') || lowerId.includes('flux') || lowerId.includes('imagen') || lowerId.includes('image') || lowerId.includes('stable-diffusion') || lowerId.includes('midjourney') || lowerId.includes('sdxl') || lowerId.includes('ideogram') || lowerId.includes('kolors') || lowerId.includes('playground') || lowerId.includes('aura') || lowerId.includes('recraft')) category = 'image'; /* cspell:disable-line */
-            else if (lowerId.includes('video') || lowerId.includes('kling') || lowerId.includes('hailuo') || lowerId.includes('veo') || lowerId.includes('luma') || lowerId.includes('sora') || lowerId.includes('pika') || lowerId.includes('gen-2') || lowerId.includes('gen-3') || lowerId.includes('animate') || lowerId.includes('movie')) category = 'video'; /* cspell:disable-line */
-
-            return { id, name: id, brand, category, provider: p.name };
-        });
+        const formattedModels = await refreshProviderModels(providerId, providers);
 
         setAvailableModels(formattedModels);
 
@@ -251,19 +184,19 @@ const SettingsPage: React.FC = () => {
     const handleSave = () => {
         setIsSaving(true);
         setTimeout(() => {
-            localStorage.setItem('api_providers', JSON.stringify(providers));
-            localStorage.setItem('api_provider', activeProviderId);
-            localStorage.setItem('replicate_api_key', replicateKey.trim());
-            localStorage.setItem('kling_api_key', klingKey.trim());
-
-            localStorage.setItem('setting_script_models', JSON.stringify(selectedScriptModels));
-            localStorage.setItem('setting_image_models', JSON.stringify(selectedImageModels));
-            localStorage.setItem('setting_video_models', JSON.stringify(selectedVideoModels));
-
-            localStorage.setItem('setting_visual_continuity', visualContinuity ? 'true' : 'false');
-            localStorage.setItem('setting_system_moderation', systemModeration ? 'true' : 'false');
-            localStorage.setItem('setting_auto_save', autoSave ? 'true' : 'false');
-            localStorage.setItem('setting_concurrent_count', concurrentCount.toString());
+            saveProviderSettings({
+                providers,
+                activeProviderId,
+                replicateKey,
+                klingKey,
+                selectedScriptModels,
+                selectedImageModels,
+                selectedVideoModels,
+                visualContinuity,
+                systemModeration,
+                autoSave,
+                concurrentCount,
+            });
 
             setIsSaving(false);
             setSaveStatus('success');

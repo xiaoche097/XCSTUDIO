@@ -96,7 +96,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: 400, opacity: 0 }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="absolute top-0 right-0 w-[480px] h-full bg-[#f8f9fc] border-l border-gray-200 shadow-[-10px_0_30px_rgba(0,0,0,0.03)] z-40 flex flex-col overflow-hidden"
+            className="absolute top-0 right-0 w-[480px] h-full bg-[#f8f9fc] border-l border-gray-200 shadow-[-10px_0_30px_rgba(0,0,0,0.03)] z-50 flex flex-col overflow-visible"
         >
             {/* Header with Toolbar - Lovart Style */}
             <div className="px-3 py-2.5 flex items-center justify-between border-b border-gray-100 z-20 shrink-0 select-none">

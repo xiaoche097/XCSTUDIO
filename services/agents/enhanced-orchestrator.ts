@@ -233,7 +233,19 @@ Analyze and route to appropriate agent. Return JSON with:
         const responseText = result && typeof result === 'object' && 'text' in result
             ? String((result as any).text)
             : '';
-        const rawJson = JSON.parse(responseText || '{}');
+        console.log('[EnhancedOrchestrator] 开始解析路由 JSON');
+        let rawJson: any = {};
+        try {
+            let cleaned = (responseText || '{}').trim();
+            const codeBlockMatch = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+            if (codeBlockMatch) {
+                cleaned = codeBlockMatch[1].trim();
+            }
+            rawJson = JSON.parse(cleaned || '{}');
+        } catch (parseError) {
+            console.error('[EnhancedOrchestrator] 路由 JSON 解析失败:', parseError);
+            return createFallbackDecision(message, finalConfig.fallbackAgent);
+        }
 
         // Zod 验证路由决策
         const parseResult = routingResponseSchema.safeParse(rawJson);

@@ -1,6 +1,6 @@
 
 export type ImageModel = 'Nano Banana Pro' | 'NanoBanana2' | 'Seedream5.0' | 'GPT Image 1.5' | 'Flux.2 Max' | 'Flux Schnell' | 'SDXL';
-export type VideoModel = 'Veo 3.1' | 'Veo 3.1 Fast' | 'Kling 2.0' | 'Kling 2.6' | 'Kling Standard' | 'Kling Pro' | 'Auto';
+export type VideoModel = 'Veo 3.1' | 'Veo 3.1 Pro' | 'Veo 3.1 Fast' | 'Kling 2.0' | 'Kling 2.6' | 'Kling Standard' | 'Kling Pro' | 'Auto';
 
 export type ShapeType = 'square' | 'circle' | 'triangle' | 'star' | 'bubble' | 'arrow-left' | 'arrow-right';
 
