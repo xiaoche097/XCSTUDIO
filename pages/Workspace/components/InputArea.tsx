@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import ReactDOM from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     ChevronDown, Plus, X, ArrowUp, Paperclip, Lightbulb, Zap, Globe, Box, Sparkles,
     Image as ImageIcon, Check, Video, FileText, Banana, ChevronLeft, ChevronRight,
-    Activity, Layers, Cloud, ShieldCheck, Monitor
+    Activity, Layers, Cloud, ShieldCheck, Monitor, MapPin
 } from 'lucide-react';
 import { useAgentStore } from '../../../stores/agent.store';
 import { useCanvasStore } from '../../../stores/canvas.store';
@@ -125,6 +125,7 @@ interface InputAreaProps {
     showVideoSettingsDropdown: boolean;
     setShowVideoSettingsDropdown: (v: boolean) => void;
     markers: any[];
+    onSaveMarkerLabel?: (markerId: string, label: string) => void;
 }
 
 export const InputArea: React.FC<InputAreaProps> = ({
@@ -143,9 +144,11 @@ export const InputArea: React.FC<InputAreaProps> = ({
     isDragOver, setIsDragOver,
     isVideoPanelHovered, setIsVideoPanelHovered,
     showVideoSettingsDropdown, setShowVideoSettingsDropdown,
-    markers,
+    markers, onSaveMarkerLabel,
 }) => {
     const [showImageUploadMenu, setShowImageUploadMenu] = useState(false);
+    const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
+    const [editingMarkerLabel, setEditingMarkerLabel] = useState('');
     const inputBlocks = useAgentStore(s => s.inputBlocks);
     const activeBlockId = useAgentStore(s => s.activeBlockId);
     const videoGenRatio = useAgentStore(s => s.videoGenRatio);
@@ -160,14 +163,15 @@ export const InputArea: React.FC<InputAreaProps> = ({
     const webEnabled = useAgentStore(s => s.webEnabled);
     const imageGenUpload = useAgentStore(s => s.imageGenUpload);
     const isPickingFromCanvas = useAgentStore(s => s.isPickingFromCanvas);
+    const pendingAttachment = useAgentStore(s => s.pendingAttachment);
 
     const {
-        setInputBlocks, removeInputBlock, insertInputFile,
+        setInputBlocks, removeInputBlock, appendInputFile,
         setActiveBlockId, setSelectionIndex,
         setVideoGenRatio, setVideoGenDuration, setVideoGenModel, setVideoGenMode,
         setVideoStartFrame, setVideoEndFrame, setVideoMultiRefs,
         setShowVideoModelDropdown, setWebEnabled, setIsAgentMode,
-        setImageGenUpload, setIsPickingFromCanvas,
+        setImageGenUpload, setIsPickingFromCanvas, confirmPendingAttachment,
     } = useAgentStore(s => s.actions);
 
     const imageGenRatio = useAgentStore(s => s.imageGenRatio);
@@ -183,10 +187,79 @@ export const InputArea: React.FC<InputAreaProps> = ({
         }
     };
 
+    const commitPendingAttachment = () => {
+        if (pendingAttachment) {
+            confirmPendingAttachment();
+        }
+    };
+
+    const handlePickedFiles = (files: File[]) => {
+        if (!files || files.length === 0) return;
+
+        if (creationMode === 'image') {
+            const firstImage = files.find((f) => f.type.startsWith('image/')) || null;
+            setImageGenUpload(firstImage);
+            return;
+        }
+
+        files.forEach((f) => {
+            if (f.type.startsWith('image/') || f.type.startsWith('video/')) {
+                appendInputFile(f);
+            }
+        });
+    };
+
+    const insertPlainTextAtCursor = (text: string) => {
+        if (!text) return;
+        const selection = window.getSelection();
+        if (!selection || selection.rangeCount === 0) return;
+
+        const range = selection.getRangeAt(0);
+        range.deleteContents();
+        const node = document.createTextNode(text);
+        range.insertNode(node);
+        range.setStartAfter(node);
+        range.collapse(true);
+        selection.removeAllRanges();
+        selection.addRange(range);
+    };
+
+    const handleEditorPaste = (e: React.ClipboardEvent<HTMLSpanElement>, blockId: string) => {
+        const clipboardData = e.clipboardData;
+        if (!clipboardData) return;
+
+        const items = Array.from(clipboardData.items || []);
+        const imageFiles: File[] = [];
+
+        for (const item of items) {
+            if (item.type && item.type.indexOf('image') !== -1) {
+                const file = item.getAsFile();
+                if (file) imageFiles.push(file);
+            }
+        }
+
+        if (imageFiles.length === 0) return;
+
+        e.preventDefault();
+        handlePickedFiles(imageFiles);
+
+        const plainText = clipboardData.getData('text/plain');
+        if (plainText) {
+            insertPlainTextAtCursor(plainText);
+        }
+
+        const nextText = e.currentTarget.textContent || '';
+        setInputBlocks(
+            useAgentStore.getState().inputBlocks.map((b) =>
+                b.id === blockId ? { ...b, text: nextText } : b
+            )
+        );
+    };
+
     return (
-        <div className="px-2 pb-2 pt-0.5 z-20">
+        <div className="px-3 py-2 z-20 flex-shrink-0">
             <div
-                className={`bg-white rounded-2xl border shadow-sm transition-all duration-200 relative group focus-within:shadow-md focus-within:border-gray-300 flex flex-col overflow-visible ${isDragOver ? 'border-blue-400 ring-2 ring-blue-100 bg-blue-50/30' : 'border-gray-200'}`}
+                className={`bg-white rounded-2xl border border-gray-200 shadow-sm transition-all duration-200 relative group focus-within:shadow-md focus-within:border-gray-300 flex flex-col overflow-visible ${isDragOver ? 'border-blue-400 ring-2 ring-blue-100 bg-blue-50/30' : ''}`}
                 onMouseEnter={() => setIsVideoPanelHovered(true)}
                 onMouseLeave={() => setIsVideoPanelHovered(false)}
                 onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); setIsDragOver(true); }}
@@ -198,7 +271,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                     if (e.dataTransfer.files.length > 0) {
                         Array.from(e.dataTransfer.files).forEach(f => {
                             if (f.type.startsWith('image/') || f.type.startsWith('video/')) {
-                                insertInputFile(f);
+                                appendInputFile(f);
                             }
                         });
                     }
@@ -209,7 +282,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                     <div className="absolute inset-0 z-30 rounded-[20px] bg-blue-50/80 border-2 border-dashed border-blue-400 flex items-center justify-center pointer-events-none">
                         <div className="flex flex-col items-center gap-2">
                             <ImageIcon size={24} className="text-blue-500" />
-                            <span className="text-sm font-medium text-blue-600">将文件拖拽至此处添加到对话</span>
+                            <span className="text-sm font-medium text-blue-600">将文件拖拽至此处添加至对话</span>
                         </div>
                     </div>
                 )}
@@ -354,21 +427,25 @@ export const InputArea: React.FC<InputAreaProps> = ({
 
                 {/* Text Input Area - Lovart style: inline mixed chips + text */}
                 <div
-                    className={`px-3 pt-2 pb-4 cursor-text transition-all`}
+                    className={`px-3 pt-1.5 pb-1.5 cursor-text transition-all`}
                     onMouseDown={(e) => {
+                        commitPendingAttachment();
                         const target = e.target as HTMLElement;
                         if (target.closest('[id^="file-chip-"]') || target.closest('[id^="marker-chip-"]')) return;
                         selectLatestCanvasChip();
                     }}
                     onClick={(e) => {
-                    if (e.target === e.currentTarget || (e.target as HTMLElement).closest('.input-flow-container') === e.currentTarget.querySelector('.input-flow-container')) {
-                        const lastText = inputBlocks.filter(b => b.type === 'text').pop();
-                        const targetId = lastText?.id || inputBlocks[inputBlocks.length - 1].id;
-                        const el = document.getElementById(`input-block-${targetId}`);
-                        el?.focus();
-                    }
-                }}>
-                    <div className="input-flow-container flex flex-wrap items-center gap-[2px]" style={{ minHeight: '24px', wordBreak: 'break-word', lineHeight: '24px' }}>
+                        if (e.target === e.currentTarget || (e.target as HTMLElement).closest('.input-flow-container') === e.currentTarget.querySelector('.input-flow-container')) {
+                            const lastText = inputBlocks.filter(b => b.type === 'text').pop();
+                            const targetId = lastText?.id || inputBlocks[inputBlocks.length - 1].id;
+                            const el = document.getElementById(`input-block-${targetId}`);
+                            el?.focus();
+                        }
+                    }}>
+                    <div
+                        className="input-flow-container flex flex-wrap items-start content-start gap-[2px] pt-2 min-h-[80px] max-h-[200px] overflow-y-auto pr-1"
+                        style={{ minHeight: '80px', maxHeight: '200px', overflowY: 'auto', wordBreak: 'break-word', lineHeight: '22px' }}
+                    >
                         {inputBlocks.map((block) => {
                             if (block.type === 'file' && block.file) {
                                 const file = block.file!;
@@ -379,33 +456,42 @@ export const InputArea: React.FC<InputAreaProps> = ({
 
                                 if (markerId) {
                                     return (
-                                            <motion.div
-                                                key={block.id}
-                                                id={`marker-chip-${block.id}`}
-                                                initial={{ scale: 0, opacity: 0 }}
-                                                animate={{ scale: 1, opacity: 1 }}
-                                                className={`inline-flex items-center gap-0 rounded-full pl-[2px] pr-1 cursor-default relative group select-none h-6 transition-all border ${isSelected ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-400' : 'bg-gray-50/50 border-gray-100 hover:bg-gray-100'}`}
-                                                onClick={(e) => { e.stopPropagation(); setSelectedChipId(isSelected ? null : block.id); }}
-                                                onMouseEnter={() => setHoveredChipId(block.id)}
-                                                onMouseLeave={() => setHoveredChipId(null)}
-                                            >
-                                                <div className="flex items-center -space-x-1.5 flex-shrink-0">
-                                                    <div className="w-5 h-5 rounded-full overflow-hidden border border-gray-100 flex-shrink-0 shadow-sm">
-                                                        <img src={URL.createObjectURL(file)} className="w-full h-full object-cover" />
-                                                    </div>
-                                                    <div className="w-3.5 h-3.5 bg-[#3B82F6] rounded-full flex items-center justify-center text-white text-[8px] font-black shadow-sm flex-shrink-0 border border-white z-10">
-                                                        {markers.findIndex(m => m.id === markerId) + 1 || '?'}
-                                                    </div>
+                                        <motion.div
+                                            key={block.id}
+                                            id={`marker-chip-${block.id}`}
+                                            initial={{ scale: 0, opacity: 0 }}
+                                            animate={{ scale: 1, opacity: 1 }}
+                                            className={`inline-flex items-center gap-0 rounded-full pl-[2px] pr-1 cursor-default relative group select-none h-6 transition-all border ${isSelected ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-400' : 'bg-gray-50/50 border-gray-100 hover:bg-gray-100'}`}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                const markerId = (file as any).markerId;
+                                                if (isSelected) {
+                                                    setEditingMarkerId(markerId);
+                                                    setEditingMarkerLabel((file as any).markerName || "");
+                                                } else {
+                                                    setSelectedChipId(block.id);
+                                                }
+                                            }}
+                                            onMouseEnter={() => setHoveredChipId(block.id)}
+                                            onMouseLeave={() => setHoveredChipId(null)}
+                                        >
+                                            <div className="flex items-center -space-x-1.5 flex-shrink-0">
+                                                <div className="w-5 h-5 rounded-full overflow-hidden border border-gray-100 flex-shrink-0 shadow-sm">
+                                                    <img src={URL.createObjectURL(file)} className="w-full h-full object-cover" />
                                                 </div>
-                                                <span className="text-[11px] text-gray-700 font-bold max-w-[80px] truncate ml-1">{(file as any).markerName || '区域'}</span>
-                                                <button onClick={(e) => { e.stopPropagation(); removeInputBlock(block.id); setSelectedChipId(null); }} className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 transition opacity-0 group-hover:opacity-100"><X size={10} /></button>
+                                                <div className="w-3.5 h-3.5 bg-[#3B82F6] rounded-full flex items-center justify-center text-white text-[8px] font-black shadow-sm flex-shrink-0 border border-white z-10">
+                                                    {markers.findIndex(m => m.id === markerId) + 1 || '?'}
+                                                </div>
+                                            </div>
+                                            <span className="text-[11px] text-gray-700 font-bold max-w-[80px] truncate ml-1">{(file as any).markerName || '区域'}</span>
+                                            <button onClick={(e) => { e.stopPropagation(); removeInputBlock(block.id); setSelectedChipId(null); }} className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 transition opacity-0 group-hover:opacity-100"><X size={10} /></button>
 
                                             {isHovered && markerInfo && (() => {
                                                 const MAX_SIZE = 220;
                                                 const ratio = markerInfo.imageWidth / markerInfo.imageHeight;
                                                 let renderWidth = MAX_SIZE;
                                                 let renderHeight = MAX_SIZE;
-                                                
+
                                                 if (ratio > 1) {
                                                     renderHeight = MAX_SIZE / ratio;
                                                 } else {
@@ -418,55 +504,55 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                                         top: (document.getElementById(`marker-chip-${block.id}`)?.getBoundingClientRect().top || 0) - renderHeight - 12,
                                                         width: renderWidth, height: renderHeight
                                                     }}>
-                                                    <motion.div
-                                                        initial={{ opacity: 0, scale: 0.9, y: 8 }}
-                                                        animate={{ opacity: 1, scale: 1, y: 0 }}
-                                                        transition={{ duration: 0.2 }}
-                                                        className="w-full h-full bg-white rounded-2xl shadow-xl overflow-hidden relative border border-gray-200"
-                                                    >
-                                                        {/* 先显示完整原图（scale=1），再动画缩放到标记区域（scale=3） */}
                                                         <motion.div
-                                                            className="absolute inset-0"
-                                                            initial={{ scale: 1 }}
-                                                            animate={{ scale: 3 }}
-                                                            transition={{
-                                                                delay: 0.5,
-                                                                duration: 0.8,
-                                                                ease: [0.25, 0.1, 0.25, 1]
-                                                            }}
-                                                            style={{
-                                                                transformOrigin: `${(markerInfo.x + markerInfo.width / 2) / markerInfo.imageWidth * 100}% ${(markerInfo.y + markerInfo.height / 2) / markerInfo.imageHeight * 100}%`
-                                                            }}
+                                                            initial={{ opacity: 0, scale: 0.9, y: 8 }}
+                                                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                                                            transition={{ duration: 0.2 }}
+                                                            className="w-full h-full bg-white rounded-2xl shadow-xl overflow-hidden relative border border-gray-200"
                                                         >
-                                                            <img src={markerInfo.fullImageUrl || URL.createObjectURL(file)} className="w-full h-full object-cover" />
-                                                            {/* 在图片上覆盖绘制对应的标记点 */}
-                                                            <div 
-                                                                className="absolute"
+                                                            {/* 先显示完整原图（scale=1），再动画缩放到标记区域（scale=3） */}
+                                                            <motion.div
+                                                                className="absolute inset-0"
+                                                                initial={{ scale: 1 }}
+                                                                animate={{ scale: 3 }}
+                                                                transition={{
+                                                                    delay: 0.5,
+                                                                    duration: 0.8,
+                                                                    ease: [0.25, 0.1, 0.25, 1]
+                                                                }}
                                                                 style={{
-                                                                    left: `${(markerInfo.x + markerInfo.width / 2) / markerInfo.imageWidth * 100}%`,
-                                                                    top: `${(markerInfo.y + markerInfo.height / 2) / markerInfo.imageHeight * 100}%`,
-                                                                    transform: 'translate(-50%, -100%)',
-                                                                    transformOrigin: 'bottom center'
+                                                                    transformOrigin: `${(markerInfo.x + markerInfo.width / 2) / markerInfo.imageWidth * 100}% ${(markerInfo.y + markerInfo.height / 2) / markerInfo.imageHeight * 100}%`
                                                                 }}
                                                             >
-                                                                <motion.div 
-                                                                     className="relative flex flex-col items-center"
-                                                                     // 因为外层最终会放大到 scale=3，我们让标记反向缩小到 scale: 0.33，这样它在放大状态下刚好是正常大小
-                                                                     initial={{ scale: 1, opacity: 0 }}
-                                                                     animate={{ scale: 0.333, opacity: 1 }}
-                                                                     transition={{ delay: 0.5, duration: 0.8, ease: [0.25, 0.1, 0.25, 1] }}
-                                                                     style={{ transformOrigin: 'bottom center' }}
+                                                                <img src={markerInfo.fullImageUrl || URL.createObjectURL(file)} className="w-full h-full object-cover" />
+                                                                {/* 在图片上覆盖绘制对应的标记点 */}
+                                                                <div
+                                                                    className="absolute"
+                                                                    style={{
+                                                                        left: `${(markerInfo.x + markerInfo.width / 2) / markerInfo.imageWidth * 100}%`,
+                                                                        top: `${(markerInfo.y + markerInfo.height / 2) / markerInfo.imageHeight * 100}%`,
+                                                                        transform: 'translate(-50%, -100%)',
+                                                                        transformOrigin: 'bottom center'
+                                                                    }}
                                                                 >
-                                                                    <div className="w-[28px] h-[28px] rounded-full bg-[#3B82F6] border-2 border-white flex items-center justify-center text-white font-bold text-[12px] relative z-10 shadow-lg">
-                                                                        {markers.findIndex(m => m.id === markerId) + 1}
-                                                                    </div>
-                                                                    <div className="w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[6px] border-t-[#3B82F6] -mt-[1px]"></div>
-                                                                </motion.div>
-                                                            </div>
+                                                                    <motion.div
+                                                                        className="relative flex flex-col items-center"
+                                                                        // 因为外层最终会放大到 scale=3，我们让标记反向缩小到 scale: 0.33，这样它在放大状态下刚好是正常大小
+                                                                        initial={{ scale: 1, opacity: 0 }}
+                                                                        animate={{ scale: 0.333, opacity: 1 }}
+                                                                        transition={{ delay: 0.5, duration: 0.8, ease: [0.25, 0.1, 0.25, 1] }}
+                                                                        style={{ transformOrigin: 'bottom center' }}
+                                                                    >
+                                                                        <div className="w-[28px] h-[28px] rounded-full bg-[#3B82F6] border-2 border-white flex items-center justify-center text-white font-bold text-[12px] relative z-10 shadow-lg">
+                                                                            {markers.findIndex(m => m.id === markerId) + 1}
+                                                                        </div>
+                                                                        <div className="w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[6px] border-t-[#3B82F6] -mt-[1px]"></div>
+                                                                    </motion.div>
+                                                                </div>
+                                                            </motion.div>
                                                         </motion.div>
-                                                    </motion.div>
-                                                </div>,
-                                                document.body
+                                                    </div>,
+                                                    document.body
                                                 );
                                             })()}
                                         </motion.div>
@@ -483,7 +569,16 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                             key={block.id}
                                             id={`file-chip-${block.id}`}
                                             className={`inline-flex items-center gap-1 rounded-full pl-[2px] pr-1.5 select-none relative group h-6 cursor-default transition-all border shrink-0 ${isSelected ? 'bg-blue-50 border-blue-300 ring-1 ring-blue-400' : isInputFocused ? 'bg-blue-50/30 border-blue-100' : 'bg-gray-50/50 border-gray-100 hover:bg-gray-100'}`}
-                                            onClick={(e) => { e.stopPropagation(); setSelectedChipId(isSelected ? null : block.id); }}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                const markerId = (file as any).markerId;
+                                                if (isSelected) {
+                                                    setEditingMarkerId(markerId);
+                                                    setEditingMarkerLabel((file as any).markerName || "");
+                                                } else {
+                                                    setSelectedChipId(block.id);
+                                                }
+                                            }}
                                             onMouseEnter={() => setHoveredChipId(block.id)}
                                             onMouseLeave={() => setHoveredChipId(null)}
                                         >
@@ -535,24 +630,25 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                         id={`input-block-${block.id}`}
                                         contentEditable
                                         suppressContentEditableWarning
-                                        className="ce-placeholder outline-none text-sm text-gray-800"
+                                        className="ce-placeholder bg-transparent border-none outline-none text-sm text-gray-800"
                                         data-placeholder={placeholder}
-                                        style={{ display: 'inline-block', verticalAlign: 'middle', lineHeight: '24px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', caretColor: '#111827', minWidth: '2px', flex: isLastTextBlock ? '1 1 auto' : '0 1 auto' }}
+                                        style={{ display: 'inline-block', verticalAlign: 'top', lineHeight: '22px', whiteSpace: 'pre-wrap', wordBreak: 'break-all', caretColor: '#111827', minWidth: '2px', flex: isLastTextBlock ? (pendingAttachment ? '0 1 auto' : '1 1 auto') : '0 1 auto' }}
                                         ref={el => { if (el && document.activeElement !== el && el.textContent !== (block.text || '')) el.textContent = block.text || ''; }}
                                         onInput={(e) => {
                                             setInputBlocks(useAgentStore.getState().inputBlocks.map(b => b.id === block.id ? { ...b, text: e.currentTarget.textContent || '' } : b));
                                             if (selectedChipId) setSelectedChipId(null);
                                         }}
-                                        onFocus={() => { setActiveBlockId(block.id); setIsInputFocused(true); }}
+                                        onPaste={(e) => handleEditorPaste(e, block.id)}
+                                        onFocus={() => { commitPendingAttachment(); setActiveBlockId(block.id); setIsInputFocused(true); }}
                                         onBlur={() => setIsInputFocused(false)}
                                         onKeyDown={(e) => {
                                             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); return; }
-                                            
+
                                             // 任何普通按键输入都取消选中
                                             if (selectedChipId && !['ArrowLeft', 'ArrowRight', 'Backspace', 'Delete', 'Shift', 'Control', 'Alt', 'Meta'].includes(e.key)) {
                                                 setSelectedChipId(null);
                                             }
-                                            
+
                                             const selection = window.getSelection();
                                             if (!selection || selection.rangeCount === 0) return;
                                             const range = selection.getRangeAt(0);
@@ -565,7 +661,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                                 if (prevBlock && prevBlock.type === 'file') {
                                                     e.preventDefault();
                                                     if (selectedChipId === prevBlock.id) {
-                                                        // 第二阶段：已选中，执行跳转
+                                                        // 绗簩闃舵锛氬凡閫変腑锛屾墽琛岃烦杞?
                                                         const prevPrev = inputBlocks[blockIndex - 2];
                                                         if (prevPrev?.type === 'text') {
                                                             const prevEl = document.getElementById(`input-block-${prevPrev.id}`);
@@ -580,7 +676,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                                         }
                                                         setSelectedChipId(null);
                                                     } else {
-                                                        // 第一阶段：先选中图片
+                                                        // 绗竴闃舵锛氬厛閫変腑鍥剧墖
                                                         setSelectedChipId(prevBlock.id);
                                                     }
                                                 }
@@ -591,7 +687,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                                 if (nextBlock && nextBlock.type === 'file') {
                                                     e.preventDefault();
                                                     if (selectedChipId === nextBlock.id) {
-                                                        // 第二阶段：已选中，执行跳转
+                                                        // 绗簩闃舵锛氬凡閫変腑锛屾墽琛岃烦杞?
                                                         const nextNext = inputBlocks[blockIndex + 2];
                                                         if (nextNext?.type === 'text') {
                                                             const nextEl = document.getElementById(`input-block-${nextNext.id}`);
@@ -606,7 +702,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                                         }
                                                         setSelectedChipId(null);
                                                     } else {
-                                                        // 第一阶段：先选中图片
+                                                        // 绗竴闃舵锛氬厛閫変腑鍥剧墖
                                                         setSelectedChipId(nextBlock.id);
                                                     }
                                                 }
@@ -645,11 +741,25 @@ export const InputArea: React.FC<InputAreaProps> = ({
                             }
                             return null;
                         })}
+
+                        {pendingAttachment && (
+                            <div
+                                id="pending-attachment-chip"
+                                className="inline-flex items-center gap-1 rounded-full pl-[2px] pr-1.5 select-none relative h-6 cursor-default transition-all border border-dashed border-blue-300 bg-blue-50/50 shrink-0 opacity-50 grayscale"
+                            >
+                                <div className="w-5 h-5 rounded-full overflow-hidden flex-shrink-0 border border-blue-200 shadow-sm">
+                                    {pendingAttachment.file.type.startsWith('image/')
+                                        ? <img src={URL.createObjectURL(pendingAttachment.file)} className="w-full h-full object-cover" />
+                                        : <FileText size={10} className="text-blue-500" />}
+                                </div>
+                                <span className="text-[11px] text-blue-700 font-bold max-w-[100px] truncate ml-0.5">待确认</span>
+                            </div>
+                        )}
                     </div>
                 </div>
 
                 {/* Bottom Toolbar */}
-                <div className="px-2 pb-2.5 pt-0 flex items-center justify-between relative">
+                <div className="px-3 py-1.5 flex items-center justify-between relative border-t border-gray-100/80">
                     <div className="flex items-center gap-1">
                         {creationMode === 'agent' && (
                             <button onClick={() => fileInputRef.current?.click()} className="w-8 h-8 rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition">
@@ -666,7 +776,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                             {showModeSelector && (
                                 <div className="absolute bottom-full left-0 mb-2 w-36 bg-white rounded-xl shadow-xl border border-gray-200 py-2 z-50">
                                     <button onClick={() => { setCreationMode('agent'); setShowModeSelector(false); setIsAgentMode(true); }} className="w-full px-3 py-2 flex items-center gap-2 text-sm hover:bg-gray-50 transition">Agent</button>
-                                    <button onClick={() => { setCreationMode('image'); setShowModeSelector(false); setIsAgentMode(false); }} className="w-full px-3 py-2 flex items-center gap-2 text-sm hover:bg-gray-50 transition">图像生成器</button>
+                                    <button onClick={() => { setCreationMode('image'); setShowModeSelector(false); setIsAgentMode(false); }} className="w-full px-3 py-2 flex items-center gap-2 text-sm hover:bg-gray-50 transition">图片生成器</button>
                                     <button onClick={() => { setCreationMode('video'); setShowModeSelector(false); setIsAgentMode(false); }} className="w-full px-3 py-2 flex items-center gap-2 text-sm hover:bg-gray-50 transition">视频生成器</button>
                                 </div>
                             )}
@@ -681,7 +791,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                         onClick={() => { setShowRatioPicker(!showRatioPicker); setShowModelPicker(false); }}
                                         className="h-9 px-4 flex items-center gap-2 bg-gray-50 text-[13px] font-bold text-gray-700 hover:bg-gray-100 rounded-full transition whitespace-nowrap border border-gray-100"
                                     >
-                                        <span>{imageGenRes} · {imageGenRatio}</span>
+                                        <span>{imageGenRes} 路 {imageGenRatio}</span>
                                         <ChevronDown size={14} className={`text-gray-400 transition-transform duration-300 ${showRatioPicker ? 'rotate-180' : ''}`} />
                                     </button>
                                     {showRatioPicker && (
@@ -701,9 +811,9 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                                     { r: '1:1', i: 'w-4 h-4' }, { r: '9:16', i: 'w-3 h-5' }, { r: '3:4', i: 'w-3.5 h-5' }, { r: '2:3', i: 'w-3.5 h-5' },
                                                     { r: '5:4', i: 'w-4.5 h-4' }, { r: '4:5', i: 'w-4 h-4.5' }
                                                 ].map(item => (
-                                                    <button 
-                                                        key={item.r} 
-                                                        onClick={() => { setImageGenRatio(item.r); setShowRatioPicker(false); }} 
+                                                    <button
+                                                        key={item.r}
+                                                        onClick={() => { setImageGenRatio(item.r); setShowRatioPicker(false); }}
                                                         className={`flex flex-col items-center gap-1.5 py-2.5 rounded-xl border transition-all ${imageGenRatio === item.r ? 'bg-gray-100 border-gray-300 ring-1 ring-gray-300' : 'border-gray-100 hover:border-gray-300 bg-white'}`}
                                                     >
                                                         <div className={`border-[1.5px] border-gray-400 rounded-[2px] ${item.i} ${imageGenRatio === item.r ? 'bg-gray-400' : 'bg-transparent'}`} />
@@ -758,7 +868,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                         onClick={() => { setShowVideoSettingsDropdown(!showVideoSettingsDropdown); }}
                                         className="h-9 px-4 flex items-center gap-2 bg-gray-50 text-[13px] font-bold text-gray-700 hover:bg-gray-100 rounded-full transition whitespace-nowrap border border-gray-100"
                                     >
-                                        <span>Frames · {videoGenRatio} · {videoGenDuration}</span>
+                                        <span>Frames 路 {videoGenRatio} 路 {videoGenDuration}</span>
                                         <ChevronDown size={14} className={`text-gray-400 transition-transform duration-300 ${showVideoSettingsDropdown ? 'rotate-180' : ''}`} />
                                     </button>
                                     {showVideoSettingsDropdown && (
@@ -771,7 +881,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                                         { id: 'startEnd', label: '首尾帧' },
                                                         { id: 'multiRef', label: '多图参考' }
                                                     ].map(m => (
-                                                        <button 
+                                                        <button
                                                             key={m.id}
                                                             onClick={() => useAgentStore.getState().actions.setVideoGenMode(m.id as any)}
                                                             className={`flex-1 py-1.5 text-[12px] font-bold rounded-lg transition-all ${videoGenMode === m.id ? 'bg-white shadow-sm text-black' : 'text-gray-400'}`}
@@ -789,9 +899,9 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                                     {[
                                                         { r: '16:9', i: 'w-6 h-3.5' }, { r: '9:16', i: 'w-3.5 h-6' }, { r: '1:1', i: 'w-4 h-4' }
                                                     ].map(item => (
-                                                        <button 
-                                                            key={item.r} 
-                                                            onClick={() => useAgentStore.getState().actions.setVideoGenRatio(item.r)} 
+                                                        <button
+                                                            key={item.r}
+                                                            onClick={() => useAgentStore.getState().actions.setVideoGenRatio(item.r)}
                                                             className={`flex flex-col items-center justify-center gap-2 py-3.5 rounded-xl border transition-all h-20 ${videoGenRatio === item.r ? 'bg-gray-100 border-gray-200' : 'border-gray-100 hover:border-gray-200 bg-white'}`}
                                                         >
                                                             <div className={`border-[1.5px] border-gray-400 rounded-[2px] ${item.i} ${videoGenRatio === item.r ? 'bg-gray-400' : 'bg-transparent'}`} />
@@ -829,7 +939,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                 </div>
 
                                 <div className="relative">
-                                    <button 
+                                    <button
                                         onClick={() => setShowVideoModelDropdown(!showVideoModelDropdown)}
                                         className={`w-9 h-9 flex items-center justify-center rounded-full transition shadow-sm border ${showVideoModelDropdown ? 'bg-gray-100 border-gray-300 text-black' : 'bg-white border-gray-100 text-gray-500 hover:text-black hover:border-gray-300'}`}
                                     >
@@ -882,11 +992,11 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                                 <h3 className="text-[17px] font-bold tracking-tight text-gray-900 font-display">模型偏好</h3>
                                                 <div className="flex items-center gap-3">
                                                     <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest">自动选择</span>
-                                                    <button 
-                                                        onClick={() => setAutoModelSelect(!autoModelSelect)} 
+                                                    <button
+                                                        onClick={() => setAutoModelSelect(!autoModelSelect)}
                                                         className={`w-11 h-6 rounded-full transition-all duration-300 relative ${autoModelSelect ? 'bg-black' : 'bg-gray-200 p-0.5'}`}
                                                     >
-                                                        <motion.div 
+                                                        <motion.div
                                                             animate={{ x: autoModelSelect ? 24 : 2 }}
                                                             className="absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm"
                                                             transition={{ type: "spring", stiffness: 500, damping: 30 }}
@@ -898,9 +1008,9 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                             {/* Tabs */}
                                             <div className="flex bg-gray-100/60 rounded-2xl p-1.5 mb-6">
                                                 {['image', 'video', '3d'].map(tab => (
-                                                    <button 
-                                                        key={tab} 
-                                                        onClick={() => setModelPreferenceTab(tab as any)} 
+                                                    <button
+                                                        key={tab}
+                                                        onClick={() => setModelPreferenceTab(tab as any)}
                                                         className={`flex-1 py-2 text-[11px] font-bold rounded-xl transition-all duration-300 uppercase tracking-wider ${modelPreferenceTab === tab ? 'bg-white text-black shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
                                                     >
                                                         {tab}
@@ -921,20 +1031,20 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                                     >
                                                         {MODEL_OPTIONS[modelPreferenceTab].map((m) => {
                                                             const isSelected = !autoModelSelect && (
-                                                                (modelPreferenceTab === 'image' && preferredImageModel === m.id) || 
-                                                                (modelPreferenceTab === 'video' && preferredVideoModel === m.id) || 
+                                                                (modelPreferenceTab === 'image' && preferredImageModel === m.id) ||
+                                                                (modelPreferenceTab === 'video' && preferredVideoModel === m.id) ||
                                                                 (modelPreferenceTab === '3d' && preferred3DModel === m.id)
                                                             );
 
                                                             return (
-                                                                <div 
-                                                                    key={m.id} 
-                                                                    onClick={() => { 
-                                                                        if (modelPreferenceTab === 'image') setPreferredImageModel(m.id as ImageModel); 
-                                                                        else if (modelPreferenceTab === 'video') setPreferredVideoModel(m.id as VideoModel); 
-                                                                        else setPreferred3DModel(m.id); 
-                                                                        setAutoModelSelect(false); 
-                                                                    }} 
+                                                                <div
+                                                                    key={m.id}
+                                                                    onClick={() => {
+                                                                        if (modelPreferenceTab === 'image') setPreferredImageModel(m.id as ImageModel);
+                                                                        else if (modelPreferenceTab === 'video') setPreferredVideoModel(m.id as VideoModel);
+                                                                        else setPreferred3DModel(m.id);
+                                                                        setAutoModelSelect(false);
+                                                                    }}
                                                                     className={`group flex items-start gap-4 p-4 rounded-[24px] cursor-pointer transition-all duration-300 border ${isSelected ? 'bg-black text-white border-black shadow-xl shadow-black/10' : 'bg-white border-gray-100/50 hover:border-gray-300 hover:shadow-md'}`}
                                                                 >
                                                                     <div className={`w-11 h-11 rounded-2xl flex items-center justify-center transition-colors shrink-0 ${isSelected ? 'bg-white/10 text-white border border-white/10' : 'bg-gray-50 text-gray-400 border border-gray-100 group-hover:bg-gray-100 group-hover:text-gray-600'}`}>
@@ -976,31 +1086,102 @@ export const InputArea: React.FC<InputAreaProps> = ({
                         )}
                     </div>
                 </div>
-            </div>
 
-            {/* Hidden file input for selecting files */}
-            <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                multiple
-                className="hidden"
-                onChange={(e) => {
-                    if (e.target.files) {
-                        if (creationMode === 'image') {
-                            const firstImage = Array.from(e.target.files).find((f: File) => f.type.startsWith('image/')) || null;
-                            setImageGenUpload(firstImage);
-                        } else {
-                            Array.from(e.target.files).forEach((f: File) => {
-                                insertInputFile(f);
-                            });
+                {/* Hidden file input for selecting files */}
+                <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => {
+                        if (e.target.files) {
+                            handlePickedFiles(Array.from(e.target.files));
                         }
-                    }
-                    if (fileInputRef.current) {
-                        fileInputRef.current.value = '';
-                    }
-                }}
-            />
+                        if (fileInputRef.current) {
+                            fileInputRef.current.value = '';
+                        }
+                    }}
+                />
+
+                {/* Object Marked Popover for Sidebar Chips */}
+                {editingMarkerId && markers.find(m => m.id === editingMarkerId) && (() => {
+                    const marker = markers.find(m => m.id === editingMarkerId);
+                    const block = inputBlocks.find(b => b.type === 'file' && (b.file as any).markerId === editingMarkerId);
+                    const chipEl = document.getElementById(`marker-chip-${block?.id}`);
+                    const rect = chipEl?.getBoundingClientRect();
+
+                    if (!marker) return null;
+
+                    return ReactDOM.createPortal(
+                        <AnimatePresence>
+                            <motion.div
+                                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                                className="fixed z-[10000] w-[220px] bg-white rounded-3xl shadow-[0_20px_40px_rgba(0,0,0,0.12)] border border-gray-100 overflow-hidden flex flex-col"
+                                style={{
+                                    left: rect ? rect.left + rect.width / 2 : '50%',
+                                    top: rect ? rect.top - 180 : '50%',
+                                    transform: 'translateX(-50%)'
+                                }}
+                            >
+                                <div className="px-5 py-3.5 border-b border-gray-50 flex items-center justify-between">
+                                    <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider">Object Marked</span>
+                                    <button
+                                        onClick={() => setEditingMarkerId(null)}
+                                        className="p-1 hover:bg-gray-100 rounded-full transition text-gray-400"
+                                    >
+                                        <X size={14} />
+                                    </button>
+                                </div>
+
+                                <div className="p-4 flex flex-col gap-3">
+                                    <div className="flex items-center gap-3 bg-gray-50/80 p-2.5 rounded-2xl border border-gray-100/50">
+                                        <div className="w-12 h-12 rounded-xl overflow-hidden shadow-sm border border-white shrink-0">
+                                            <img src={marker.cropUrl} className="w-full h-full object-cover" />
+                                        </div>
+                                        <div className="flex-1 min-w-0">
+                                            <div className="text-[10px] text-gray-400 font-bold mb-0.5 uppercase">AI 分析</div>
+                                            <div className="text-[13px] font-bold text-gray-700 truncate">{marker.analysis || '识别中...'}</div>
+                                        </div>
+                                    </div>
+
+                                    <div className="relative group">
+                                        <div className="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-500 transition-colors">
+                                            <MapPin size={14} strokeWidth={2} />
+                                        </div>
+                                        <input
+                                            autoFocus
+                                            value={editingMarkerLabel}
+                                            onChange={(e) => setEditingMarkerLabel(e.target.value)}
+                                            onKeyDown={(e) => {
+                                                if (e.key === 'Enter') {
+                                                    if (onSaveMarkerLabel) onSaveMarkerLabel(editingMarkerId, editingMarkerLabel);
+                                                    setEditingMarkerId(null);
+                                                }
+                                            }}
+                                            placeholder="自定义描述..."
+                                            className="w-full h-10 pl-9 pr-10 bg-gray-50/50 hover:bg-white focus:bg-white border border-transparent focus:border-blue-500 rounded-2xl text-[13px] font-bold text-gray-800 transition-all outline-none"
+                                        />
+                                        <button
+                                            onClick={() => {
+                                                if (onSaveMarkerLabel) onSaveMarkerLabel(editingMarkerId, editingMarkerLabel);
+                                                setEditingMarkerId(null);
+                                            }}
+                                            className="absolute right-2 top-1/2 -translate-y-1/2 w-7 h-7 bg-blue-500 hover:bg-blue-600 text-white rounded-[10px] flex items-center justify-center shadow-md shadow-blue-500/20 transition-all active:scale-95"
+                                        >
+                                            <Check size={14} strokeWidth={3} />
+                                        </button>
+                                    </div>
+                                </div>
+                                <div className="absolute bottom-[-6px] left-1/2 -translate-x-1/2 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-white"></div>
+                            </motion.div>
+                        </AnimatePresence>,
+                        document.body
+                    );
+                })()}
+            </div>
         </div>
     );
 };

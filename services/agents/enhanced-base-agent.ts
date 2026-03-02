@@ -4,7 +4,7 @@
  */
 
 import { Chat, Type } from "@google/genai";
-import { createChatSession, getApiKey, getClient, getBestModelId } from "../gemini";
+import { createChatSession, generateJsonResponse, getApiKey, getBestModelId } from "../gemini";
 import {
   AgentTask,
   AgentInfo,
@@ -448,6 +448,9 @@ export abstract class EnhancedBaseAgent {
   private async executeInternal(task: AgentTask): Promise<AgentTask> {
     const { message, context } = task.input;
     const store = useAgentStore.getState();
+    const skillData = task.input.metadata?.skillData as
+      | { id?: string; config?: Record<string, any> }
+      | undefined;
     const forceImageToolCall = this.shouldForceImageToolCall(
       message,
       task.input.metadata,
@@ -471,6 +474,41 @@ export abstract class EnhancedBaseAgent {
       progressStep: 2,
       totalSteps: 4,
     });
+
+    if (skillData?.id === "xcai-oneclick") {
+      store.actions.setCurrentTask({
+        ...task,
+        status: "executing",
+        progressMessage: "正在执行 SKYSPER 一键流程（Startup -> P5）...",
+        progressStep: 3,
+        totalSteps: 4,
+      });
+
+      const oneclickResult = await executeSkill("xcaiOneclick", {
+        input: {
+          message,
+          referenceImages: task.input.uploadedAttachments || [],
+          attachments: task.input.uploadedAttachments || [],
+        },
+        config: skillData.config || {},
+      });
+
+      return {
+        ...task,
+        status: "completed",
+        output: {
+          message:
+            typeof oneclickResult === "string"
+              ? oneclickResult
+              : "SKYSPER One-Click 执行完成。",
+          analysis: "已按 Core + Packs 方式完成 Startup、P0-P5 分阶段编排。",
+          proposals: [],
+          assets: [],
+          adjustments: ["可继续：按 P3 主图指令直接生成", "可继续：按 P4 输出分批生成副图"],
+        },
+        updatedAt: Date.now(),
+      };
+    }
 
     // 1.5 定义字段名容错修复函数
     const fixSkillCalls = (obj: any) => {
@@ -836,18 +874,18 @@ export abstract class EnhancedBaseAgent {
             fallbackSkillCalls =
               requestedCountFromMessage > 1
                 ? this.buildMultiImageFallbackCalls(
+                  message,
+                  requestedCountFromMessage,
+                  task.input.attachments,
+                  task.input.metadata,
+                )
+                : [
+                  this.buildForcedGenerateImageCall(
                     message,
-                    requestedCountFromMessage,
                     task.input.attachments,
                     task.input.metadata,
-                  )
-                : [
-                    this.buildForcedGenerateImageCall(
-                      message,
-                      task.input.attachments,
-                      task.input.metadata,
-                    ),
-                  ];
+                  ),
+                ];
             console.warn(
               `[${this.agentInfo.id}] Forced execution guard activated. Built ${fallbackSkillCalls.length} fallback skillCalls.`,
             );
@@ -961,7 +999,7 @@ export abstract class EnhancedBaseAgent {
     let finalMessage =
       assets.length > 0
         ? plan.message ||
-          `我已根据方案为您生成了 ${assets.length} 张图片并添加至画布。`
+        `我已根据方案为您生成了 ${assets.length} 张图片并添加至画布。`
         : plan.message || plan.analysis || "任务已完成";
 
     const postGenerationSummary =
@@ -1015,7 +1053,6 @@ export abstract class EnhancedBaseAgent {
     metadata?: Record<string, any>,
   ): Promise<any> {
     try {
-      const ai = getClient();
       const forceImageToolCall = this.shouldForceImageToolCall(
         message,
         metadata,
@@ -1089,8 +1126,8 @@ export abstract class EnhancedBaseAgent {
           ? `
 【多模态参考图 URL（优先用于 Tool 参数）】
 ${multimodalRefUrls
-  .map((url: string, index: number) => `- REF_URL_${index}: ${url}`)
-  .join("\n")}
+            .map((url: string, index: number) => `- REF_URL_${index}: ${url}`)
+            .join("\n")}
 - 当你构造 generateImage 参数时，优先把参考图填入 reference_image_url（也可同步填入 init_image）。
 - 若使用 ATTACHMENT_N，也请同时保证 referenceImage 字段存在。`
           : "";
@@ -1106,32 +1143,33 @@ ${multimodalRefUrls
 
 附件列表:
 ${(attachments || [])
-  .map((file, index) => {
-    const info = (file as any).markerInfo;
-    const uploadedUrl =
-      uploadedAttachments && uploadedAttachments[index]
-        ? `\n- 🌐 公网预览图: ${uploadedAttachments[index]}`
-        : "";
+          .map((file, index) => {
+            const info = (file as any).markerInfo;
+            const markerName = (file as any).markerName;
+            const uploadedUrl =
+              uploadedAttachments && uploadedAttachments[index]
+                ? `\n- 🌐 公网预览图: ${uploadedAttachments[index]}`
+                : "";
 
-    if (info) {
-      const ratio = (info.width / info.height).toFixed(2);
-      return `- 附件 ${index + 1}: [画布选区] (尺寸: ${info.width}x${info.height}, 比例: ${ratio})。这是用户的产品图片，必须作为参考图使用。设置 referenceImage 为 'ATTACHMENT_${index}'。${uploadedUrl}`;
-    }
-    return `- 附件 ${index + 1}: ${file.name} (${file.type})。引用方式: 'ATTACHMENT_${index}'${uploadedUrl}`;
-  })
-  .join("\n")}
+            if (info) {
+              const ratio = (info.width / info.height).toFixed(2);
+              return `- 附件 ${index + 1}: [画布选区]${markerName ? ` (描述/标识: "${markerName}")` : ""} (尺寸: ${info.width}x${info.height}, 比例: ${ratio})。这是用户的产品图片，必须作为参考图使用。设置 referenceImage 为 'ATTACHMENT_${index}'。${uploadedUrl}`;
+            }
+            return `- 附件 ${index + 1}: ${file.name}${markerName ? ` (描述/标识: "${markerName}")` : ""} (${file.type})。引用方式: 'ATTACHMENT_${index}'${uploadedUrl}`;
+          })
+          .join("\n")}
 
 对话历史 (Context):
 ${(context.conversationHistory || [])
-  .map((msg) => {
-    const roleName = msg.role === "user" ? "用户" : "智能助手";
-    const attachmentsText =
-      msg.attachments && msg.attachments.length > 0
-        ? ` [附图/素材: ${msg.attachments.join(", ")}]`
-        : "";
-    return `${roleName}: ${msg.text}${attachmentsText}`;
-  })
-  .join("\n")}
+          .map((msg) => {
+            const roleName = msg.role === "user" ? "用户" : "智能助手";
+            const attachmentsText =
+              msg.attachments && msg.attachments.length > 0
+                ? ` [附图/素材: ${msg.attachments.join(", ")}]`
+                : "";
+            return `${roleName}: ${msg.text}${attachmentsText}`;
+          })
+          .join("\n")}
 
 可用技能: ${this.preferredSkills.join(", ")}
 ${smartEditSection}
@@ -1151,11 +1189,15 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
       // Build content parts - text + image attachments for visual understanding
       const parts: any[] = [{ text: fullPrompt }];
 
-      // Add image attachments so Gemini can SEE the product
+      const selectedMode = useAgentStore.getState().modelMode || 'fast';
+      const bestModel = getBestModelId(selectedMode === 'thinking' ? "thinking" : "text");
+      const supportsInlineImageInput = /gemini|gpt-4o|vision|vl|claude-3/i.test(bestModel);
+
+      // Add image attachments so model can see the product (only for multimodal-capable models)
       if (attachments && attachments.length > 0) {
         for (const file of attachments) {
           try {
-            if (file.type && file.type.startsWith("image/")) {
+            if (supportsInlineImageInput && file.type && file.type.startsWith("image/")) {
               // 使用 FileReader + readAsDataURL 替代慢的 btoa(String.fromCharCode(...))
               const base64 = await new Promise<string>((resolve, reject) => {
                 const reader = new FileReader();
@@ -1188,74 +1230,70 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
 
       const forcedSchema = forceImageToolCall
         ? {
-            type: Type.OBJECT,
-            properties: {
-              analysis: { type: Type.STRING },
-              message: { type: Type.STRING },
-              preGenerationMessage: { type: Type.STRING },
-              postGenerationSummary: { type: Type.STRING },
-              proposals: {
-                type: Type.ARRAY,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    id: { type: Type.STRING },
-                    title: { type: Type.STRING },
-                    description: { type: Type.STRING },
-                    skillCalls: {
-                      type: Type.ARRAY,
-                      minItems: 1,
-                      items: {
-                        type: Type.OBJECT,
-                        properties: {
-                          skillName: {
-                            type: Type.STRING,
-                            enum: ["generateImage"],
-                          },
-                          params: IMAGE_TOOL_PARAMS_SCHEMA,
+          type: Type.OBJECT,
+          properties: {
+            analysis: { type: Type.STRING },
+            message: { type: Type.STRING },
+            preGenerationMessage: { type: Type.STRING },
+            postGenerationSummary: { type: Type.STRING },
+            proposals: {
+              type: Type.ARRAY,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  id: { type: Type.STRING },
+                  title: { type: Type.STRING },
+                  description: { type: Type.STRING },
+                  skillCalls: {
+                    type: Type.ARRAY,
+                    minItems: 1,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        skillName: {
+                          type: Type.STRING,
+                          enum: ["generateImage"],
                         },
-                        required: ["skillName", "params"],
+                        params: IMAGE_TOOL_PARAMS_SCHEMA,
                       },
+                      required: ["skillName", "params"],
                     },
                   },
-                  required: ["id", "title", "description", "skillCalls"],
                 },
-              },
-              skillCalls: {
-                type: Type.ARRAY,
-                minItems: 1,
-                items: {
-                  type: Type.OBJECT,
-                  properties: {
-                    skillName: { type: Type.STRING, enum: ["generateImage"] },
-                    params: IMAGE_TOOL_PARAMS_SCHEMA,
-                  },
-                  required: ["skillName", "params"],
-                },
-              },
-              suggestions: {
-                type: Type.ARRAY,
-                items: { type: Type.STRING },
+                required: ["id", "title", "description", "skillCalls"],
               },
             },
-          }
+            skillCalls: {
+              type: Type.ARRAY,
+              minItems: 1,
+              items: {
+                type: Type.OBJECT,
+                properties: {
+                  skillName: { type: Type.STRING, enum: ["generateImage"] },
+                  params: IMAGE_TOOL_PARAMS_SCHEMA,
+                },
+                required: ["skillName", "params"],
+              },
+            },
+            suggestions: {
+              type: Type.ARRAY,
+              items: { type: Type.STRING },
+            },
+          },
+        }
         : undefined;
 
       const response = await withTimeout(
         retryAsync(
           async () => {
-            const mode = useAgentStore.getState().modelMode || 'fast';
-            const bestModel = getBestModelId(mode === 'thinking' ? "thinking" : "text");
-            console.log(`[analyzeAndPlan] [${mode}] 发起分析请求，选用模型: ${bestModel}`);
-            return ai.models.generateContent({
+            console.log(`[analyzeAndPlan] [${selectedMode}] 发起分析请求，选用模型: ${bestModel}`);
+            return generateJsonResponse({
               model: bestModel,
-              contents: { parts },
-              config: {
-                temperature: forceImageToolCall ? 0.2 : 0.7,
-                responseMimeType: "application/json",
-                ...(forcedSchema ? { responseSchema: forcedSchema } : {}),
-              },
-              ...toolConfig,
+              parts,
+              temperature: forceImageToolCall ? 0.2 : 0.7,
+              ...(forcedSchema ? { responseSchema: forcedSchema } : {}),
+              ...(toolConfig?.tools ? { tools: toolConfig.tools } : {}),
+              operation: `${this.agentInfo.id}.analyzeAndPlan`
             });
           },
           3, // 增加到 3 次重试，应付中转站波动
@@ -1274,8 +1312,8 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
           : [];
         const proposalCalls = Array.isArray(parsedPlan.proposals)
           ? parsedPlan.proposals.flatMap((p: any) =>
-              Array.isArray(p.skillCalls) ? p.skillCalls : [],
-            )
+            Array.isArray(p.skillCalls) ? p.skillCalls : [],
+          )
           : [];
         const hasGenerateImage = [...topCalls, ...proposalCalls].some(
           (c: any) => /^generateImage$/i.test(c?.skillName || ""),
@@ -1358,7 +1396,7 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
       "正在执行最后的像素级精修...",
       "正在为您将作品同步至画布..."
     ];
-    
+
     let pIdx = 0;
     const pInterval = setInterval(() => {
       if (pIdx < progressSteps.length) {
@@ -1609,7 +1647,7 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
       /换成|改成|改为|替换|修改|调整|去掉|删除|移除|去除|去背景|换背景|换颜色|改颜色|recolor|remove|replace/i.test(
         message,
       );
-    
+
     if (isEdit) {
       return ["继续微调", "一键抠图", "提升画质", "尝试不同配色"];
     }
@@ -1617,14 +1655,14 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
     const isLandscape = /(横版|横屏|宽屏|16:9|landscape)/i.test(message);
     const isPortrait = /(竖版|竖屏|手机屏|9:16|portrait)/i.test(message);
     const isSquare = /(方图|1:1|正方形|square)/i.test(message);
-    
+
     const suggestions = [];
     if (isLandscape) suggestions.push("换成竖版");
     else if (isPortrait) suggestions.push("换成横版");
     else suggestions.push("尝试横版", "尝试竖版");
 
     suggestions.push("换个风格", "换个配色", "重新生成");
-    
+
     return suggestions.slice(0, 4);
   }
 
@@ -1653,7 +1691,7 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
     const hasRefs =
       (task.input.uploadedAttachments?.length || 0) > 0 ||
       (task.input.metadata?.multimodalContext?.referenceImageUrls?.length || 0) >
-        0;
+      0;
     const lighting = /夜景|cinematic|电影|neon|霓虹/i.test(
       task.input.message || "",
     )

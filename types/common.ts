@@ -48,6 +48,7 @@ export interface CanvasElement {
   genFirstLastMode?: 'startEnd' | 'multiRef'; // Toggle for "Start/End Frame" vs "Multi Ref" in Veo 3.1
 
   isGenerating?: boolean;
+  generatingType?: 'upscale' | 'vector' | 'remove-bg' | 'gen-image' | 'gen-video';
 
   x: number;
   y: number;
@@ -70,10 +71,12 @@ export interface Marker {
   y: number; // Relative to the element
   elementId: string;
   cropUrl?: string; // The zoomed-in image data of the marked area
+  label?: string; // User defined label
   analysis?: string; // AI analysis result
   width?: number; // Optional width of the marked region
   height?: number; // Optional height of the marked region
 }
+
 
 export interface ConversationSession {
   id: string;
@@ -141,6 +144,7 @@ export interface ChatMessage {
     id: string;
     name: string;
     iconName: string;
+    config?: Record<string, any>;
   };
 }
 

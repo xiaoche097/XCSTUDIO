@@ -101,7 +101,7 @@ const SettingsPage: React.FC = () => {
     const navigate = useNavigate();
     const [activeTab, setActiveTab] = useState<SettingsTab>('api');
     const [providers, setProviders] = useState<ApiProviderConfig[]>(getDefaultProviders());
-    const [activeProviderId, setActiveProviderId] = useState('gemini');
+    const [activeProviderId, setActiveProviderId] = useState('yunwu');
 
     const [replicateKey, setReplicateKey] = useState('');
     const [klingKey, setKlingKey] = useState('');

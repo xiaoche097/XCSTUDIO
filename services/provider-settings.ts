@@ -65,8 +65,8 @@ const VIDEO_MODEL_ALIASES: Record<string, string> = {
 
 export const getDefaultProviders = (): ApiProviderConfig[] => {
   return [
-    { id: 'gemini', name: 'Gemini (原生)', baseUrl: 'https://generativelanguage.googleapis.com', apiKey: '' },
     { id: 'yunwu', name: '云雾 (OpenAI)', baseUrl: 'https://yunwu.ai', apiKey: '' },
+    { id: 'gemini', name: 'Gemini (原生)', baseUrl: 'https://generativelanguage.googleapis.com', apiKey: '' },
   ];
 };
 
@@ -107,10 +107,21 @@ export const loadProviderSettings = (): LoadedProviderSettings => {
     const geminiKey = localStorage.getItem('gemini_api_key') || '';
     const yunwuKey = localStorage.getItem('yunwu_api_key') || '';
     providers = [
-      { id: 'gemini', name: 'Gemini (原生)', baseUrl: 'https://generativelanguage.googleapis.com', apiKey: geminiKey },
       { id: 'yunwu', name: '云雾 (OpenAI)', baseUrl: 'https://yunwu.ai', apiKey: yunwuKey },
+      { id: 'gemini', name: 'Gemini (原生)', baseUrl: 'https://generativelanguage.googleapis.com', apiKey: geminiKey },
     ];
   }
+
+  const storedActiveProviderId = localStorage.getItem('api_provider');
+  const hasStoredActiveProvider = !!storedActiveProviderId;
+  const fallbackActiveProviderId = hasStoredActiveProvider
+    ? storedActiveProviderId!
+    : (providers.find(p => p.id === 'yunwu')?.id || providers[0]?.id || 'yunwu');
+
+  const activeProviderExists = providers.some(p => p.id === fallbackActiveProviderId);
+  const activeProviderId = activeProviderExists
+    ? fallbackActiveProviderId
+    : (providers.find(p => p.id === 'yunwu')?.id || providers[0]?.id || 'yunwu');
 
   const selectedVideoModels = normalizeVideoModels(
     safeJsonArray(localStorage.getItem('setting_video_models'), [DEFAULT_VIDEO_MODEL])
@@ -119,7 +130,7 @@ export const loadProviderSettings = (): LoadedProviderSettings => {
 
   return {
     providers,
-    activeProviderId: localStorage.getItem('api_provider') || 'gemini',
+    activeProviderId,
     replicateKey: localStorage.getItem('replicate_api_key') || '',
     klingKey: localStorage.getItem('kling_api_key') || '',
     selectedScriptModels: safeJsonArray(localStorage.getItem('setting_script_models'), ['gemini-3-flash-preview']),

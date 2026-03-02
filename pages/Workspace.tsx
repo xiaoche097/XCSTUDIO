@@ -107,6 +107,29 @@ const STORAGE_ID_TO_PREFERRED_IMAGE_MODEL: Record<string, ImageModel> = {
     'Flux.2 Max': 'Flux.2 Max',
 };
 
+const UPSCALE_STRATEGIES = {
+    standard: {
+        name: '标准增强',
+        desc: '常规高清放大，保留原始细节',
+        prompt: 'Enhance and upscale this image to higher resolution while preserving all details'
+    },
+    vector: {
+        name: '矢量草图',
+        desc: '将图像解析为专业级矢量线稿',
+        prompt: `【任务】将输入图像解析为专业级矢量线稿\n\n【自适应分析】\n首先识别画面主体类型，动态调整线条策略：\n- 生物类：捕捉毛发走向、皮肤褶皱、肌肉轮廓\n- 建筑/物品：强调结构边缘、材质分界、几何关系\n- 自然景观：表现植被层次、地形起伏、水纹流向\n- 织物/软质：体现垂坠感、褶皱逻辑、编织纹理\n\n【线条层级系统】\nL1 主轮廓：定义物体边界与剪影\nL2 结构线：表达体积转折、内部形态\nL3 细节线：材质特征、微观纹理走向\nL4 氛围线：暗示光影边界、空间深度（可选）\n\n【输出标准】\n✓ 纯黑白、线条闭合流畅、层次分明\n✗ 禁止：灰度填充、渐变、模糊、噪点`
+    },
+    color: {
+        name: '色彩分析',
+        desc: '生成专业级平面色彩构成分析图',
+        prompt: `【任务】生成专业级平面色彩构成分析图\n\n【动态识别流程】\n\n第一步：智能区域划分\n根据画面内容自适应识别：\n- 主体与背景的边界\n- 不同材质/物体的分界\n- 色彩自然过渡的断点\n- 光影造成的色域变化\n\n第二步：色块提纯与填充\n- 每个识别区域 → 提取代表色 → 均匀填充\n- 保留色彩的层级关系与空间暗示\n- 相邻色块需有足够的明度/色相区分\n\n第三步：全面净化\n移除所有非色彩本质的信息：\n× 光影（高光、阴影、环境光）\n× 材质（纹理、反射、透明度）\n× 噪声（颗粒、杂色、压缩痕迹）\n\n【输出】\n边界清晰的纯色块构成图，\n色彩关系 = 唯一视觉语言，\n可直接用于配色提案或风格化创作`
+    },
+    detail: {
+        name: '超清重绘',
+        desc: '深度解析并生成高细节复刻图',
+        prompt: `【图像深度解析与提示词生成框架】\n\n根据输入图像，按以下模块输出完整提示词：\n\n══ A. 核心主题 ══\n• 主体识别：[具体是什么——人/物/景/场景]\n• 核心叙事：[画面在表达/传递什么]\n• 构图逻辑：[视觉引导、元素排列、空间层次]\n\n══ B. 风格与质感 ══\n• 艺术风格：[写实/插画/3D/特定流派]\n• 色彩体系：[主色调、配色逻辑、冷暖氛围]\n• 光影设计：[光源、明暗比、光质软硬]\n• 材质表现：[根据主体动态描述]\n\n══ C. 细节层级（核心） ══\n• 宏观细节：[整体形态、大结构特征]\n• 中观细节：[局部特征、材质分界、色彩过渡]\n• 微观细节：[根据主体类型动态捕捉]\n  - 生物：毛发丝缕、皮肤毛孔、眼睛湿润反光、血管纹理\n  - 建筑：砖缝灰浆、锈蚀痕迹、玻璃反射、墙面风化\n  - 自然：叶脉经络、水珠折射、岩石层理、云层厚度\n  - 物品：使用磨损、划痕包浆、接缝工艺、材质颗粒\n  - 织物：编织纹理、纤维走向、褶皱阴影、边缘毛边\n\n══ D. 氛围与情绪 ══\n• 整体氛围：[宁静/紧张/梦幻/史诗/日常等]\n• 时间暗示：[季节、时段、年代感]\n• 故事张力：[画面暗示的前因后果]\n\n══ E. 技术参数 ══\n• 视角：[广角/标准/微距/鸟瞰/平视]\n• 景深：[全景深/选择性虚化/焦点位置]\n• 清晰度：[锐利边缘/柔焦/运动模糊]\n• 渲染品质：[照片级/超写实/风格化]`
+    }
+};
+
 type ToolType = 'select' | 'hand' | 'mark' | 'insert' | 'shape' | 'text' | 'brush' | 'eraser';
 
 // Utility to compress image to max dimensions to save storage and improve performance
@@ -297,6 +320,9 @@ const Workspace: React.FC = () => {
     const [markers, setMarkers] = useState<Marker[]>([]);
     const [isCtrlPressed, setIsCtrlPressed] = useState(false);
     const [hoveredMarkerId, setHoveredMarkerId] = useState<number | null>(null);
+    const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
+    const [editingMarkerLabel, setEditingMarkerLabel] = useState('');
+
     const [leftPanelMode, setLeftPanelMode] = useState<'layers' | 'files' | null>(null);
     const [contextMenu, setContextMenu] = useState<{ x: number, y: number } | null>(null);
     const [showHistoryPopover, setShowHistoryPopover] = useState(false);
@@ -347,7 +373,7 @@ const Workspace: React.FC = () => {
         setVideoMultiRefs, setShowVideoModelDropdown,
         setDetectedTexts, setEditedTexts, setIsExtractingText,
         setFastEditPrompt, setBrushSize, setUpscaleMenuOpen,
-        setIsAgentMode, insertInputFile,
+        setIsAgentMode, insertInputFile, setPendingAttachment,
     } = useAgentStore(s => s.actions);
 
     // Reactive focus: when activeBlockId changes (e.g. after insertInputFile), focus the new block
@@ -406,6 +432,12 @@ const Workspace: React.FC = () => {
     } | null>(null);
     const [touchEditInstruction, setTouchEditInstruction] = useState('');
     const [isTouchEditing, setIsTouchEditing] = useState(false);
+
+    // Upscale States
+    // Upscale States
+    const [showUpscalePanel, setShowUpscalePanel] = useState(false);
+    const [selectedUpscaleRes, setSelectedUpscaleRes] = useState<'2K' | '4K' | '8K'>('2K');
+    const [showUpscaleResDropdown, setShowUpscaleResDropdown] = useState(false);
 
     // Export States
     const [showExportMenu, setShowExportMenu] = useState(false);
@@ -487,16 +519,16 @@ const Workspace: React.FC = () => {
             if (!containerRef.current?.contains(target)) {
                 return;
             }
-            
+
             // 排除所有非画布覆盖层 UI：侧边栏、对话框、各种 Modal、Popovers、输入框、工具栏以及历史记录
             const isSidebar = target.closest('.assistant-sidebar') || target.closest('.right-sidebar');
             const isInputArea = target.closest('.input-flow-container') || target.closest('.message-list') || target.closest('[class*="InputArea"]');
-            const isPopupUI = target.closest('.history-popover-content') || 
-                              target.closest('.file-list-modal') || 
-                              target.closest('.settings-modal') || 
-                              target.closest('.dialog-overlay') ||
-                              target.closest('[class*="Modal"]') ||
-                              target.closest('[class*="Dialog"]');
+            const isPopupUI = target.closest('.history-popover-content') ||
+                target.closest('.file-list-modal') ||
+                target.closest('.settings-modal') ||
+                target.closest('.dialog-overlay') ||
+                target.closest('[class*="Modal"]') ||
+                target.closest('[class*="Dialog"]');
 
             if (isSidebar || isInputArea || isPopupUI) {
                 return;
@@ -521,9 +553,12 @@ const Workspace: React.FC = () => {
             setShowModelPicker(false);
             setShowResPicker(false);
             setShowRatioPicker(false);
+            setShowUpscalePanel(false);
+            setShowUpscaleResDropdown(false);
+            setPendingAttachment(null);
         };
 
-        window.addEventListener('mousedown', handleGlobalMouseDown, true); 
+        window.addEventListener('mousedown', handleGlobalMouseDown, true);
         return () => window.removeEventListener('mousedown', handleGlobalMouseDown, true);
     }, [activeTool, isSpacePressed]);
 
@@ -555,28 +590,51 @@ const Workspace: React.FC = () => {
         if (!selectedElementId) return;
         const el = elements.find(e => e.id === selectedElementId);
         if (!el || !el.url) return;
-        setElements(prev => prev.map(e => e.id === selectedElementId ? { ...e, isGenerating: true } : e));
+
+        const newId = `upscale-${Date.now()}`;
+        const newEl: CanvasElement = {
+            ...el,
+            id: newId,
+            x: el.x + el.width + 20,
+            isGenerating: true,
+            generatingType: 'upscale',
+            url: undefined,
+            zIndex: elements.length + 10
+        };
+        setElements(prev => [...prev, newEl]);
+        setSelectedElementId(newId);
+
         try {
             const base64Ref = await urlToBase64(el.url);
+            const prompt = `【图像深度解析与提示词生成框架】\n\n根据输入图像，按以下模块输出完整提示词：\n\n══ A. 核心主题 ══\n• 主体识别：[具体是什么——人/物/景/场景]\n• 核心叙事：[画面在表达/传递什么]\n• 构图逻辑：[视觉引导、元素排列、空间层次]\n\n══ B. 风格与质感 ══\n• 艺术风格：[写实/插画/3D/特定流派]\n• 色彩体系：[主色调、配色逻辑、冷暖氛围]\n• 光影设计：[光源、明暗比、光质软硬]\n• 材质表现：[根据主体动态描述]\n\n══ C. 细节层级（核心） ══\n• 宏观细节：[整体形态、大结构特征]\n• 中观细节：[局部特征、材质分界、色彩过渡]\n• 微观细节：[根据主体类型动态捕捉]\n  - 生物：毛发丝缕、皮肤毛孔、眼睛湿润反光、血管纹理\n  - 建筑：砖缝灰浆、锈蚀痕迹、玻璃反射、墙面风化\n  - 自然：叶脉经络、水珠折射、岩石层理、云层厚度\n  - 物品：使用磨损、划痕包浆、接缝工艺、材质颗粒\n  - 织物：编织纹理、纤维走向、褶皱阴影、边缘毛边\n\n══ D. 氛围与情绪 ══\n• 整体氛围：[宁静/紧张/梦幻/史诗/日常等]\n• 时间暗示：[季节、时段、年代感]\n• 故事张力：[画面暗示的前因后果]\n\n══ E. 技术参数 ══\n• 视角：[广角/标准/微距/鸟瞰/平视]\n• 景深：[全景深/选择性虚化/焦点位置]\n• 清晰度：[锐利边缘/柔焦/运动模糊]\n• 渲染品质：[照片级/超写实/风格化]`;
+
             const result = await smartEditSkill({
                 sourceUrl: base64Ref,
                 editType: 'upscale',
-                parameters: { factor }
+                parameters: {
+                    factor,
+                    prompt
+                }
             });
             if (result) {
                 const img = new Image();
                 img.src = result;
                 img.onload = () => {
-                    const updated = elements.map(e => e.id === selectedElementId ? { ...e, isGenerating: false, url: result } : e);
-                    setElements(updated);
-                    saveToHistory(updated, markers);
+                    setElements(prev => prev.map(e => e.id === newId ? {
+                        ...e,
+                        isGenerating: false,
+                        url: result,
+                        width: el.width * factor,
+                        height: el.height * factor
+                    } : e));
+                    saveToHistory(elements, markers);
                 };
             } else {
-                setElements(prev => prev.map(e => e.id === selectedElementId ? { ...e, isGenerating: false } : e));
+                setElements(prev => prev.filter(e => e.id !== newId));
             }
         } catch (e) {
             console.error('Upscale failed:', e);
-            setElements(prev => prev.map(e => e.id === selectedElementId ? { ...e, isGenerating: false } : e));
+            setElements(prev => prev.filter(e => e.id !== newId));
         }
     };
 
@@ -591,6 +649,52 @@ const Workspace: React.FC = () => {
     const handleExecuteEraser = () => {
         setEraserMode(false);
         console.log('Execute erase');
+    };
+
+    const handleVectorRedraw = async () => {
+        if (!selectedElementId) return;
+        const el = elements.find(e => e.id === selectedElementId);
+        if (!el || !el.url) return;
+
+        const newId = `vector-${Date.now()}`;
+        const newEl: CanvasElement = {
+            ...el,
+            id: newId,
+            x: el.x + el.width + 20,
+            isGenerating: true,
+            generatingType: 'vector',
+            url: undefined,
+            zIndex: elements.length + 10
+        };
+        setElements(prev => [...prev, newEl]);
+        setSelectedElementId(newId);
+
+        try {
+            const base64Ref = await urlToBase64(el.url);
+            const prompt = `【任务】将输入图像解析为专业级矢量线稿\n\n【自适应分析】\n首先识别画面主体类型，动态调整线条策略：\n- 生物类：捕捉毛发走向、皮肤褶皱、肌肉轮廓\n- 建筑/物品：强调结构边缘、材质分界、几何关系\n- 自然景观：表现植被层次、地形起伏、水纹流向\n- 织物/软质：体现垂坠感、褶皱逻辑、编织纹理\n\n【线条层级系统】\nL1 主轮廓：定义物体边界与剪影\nL2 结构线：表达体积转折、内部形态\nL3 细节线：材质特征、微观纹理走向\nL4 氛围线：暗示光影边界、空间深度（可选）\n\n【输出标准】\n✓ 纯黑白、线条闭合流畅、层次分明\n✗ 禁止：灰度填充、渐变、模糊、噪点`;
+
+            const result = await smartEditSkill({
+                sourceUrl: base64Ref,
+                editType: 'upscale', // Using upscale engine for redraw
+                parameters: {
+                    factor: 2,
+                    prompt
+                }
+            });
+            if (result) {
+                const img = new Image();
+                img.src = result;
+                img.onload = () => {
+                    setElements(prev => prev.map(e => e.id === newId ? { ...e, isGenerating: false, url: result } : e));
+                    saveToHistory(elements, markers);
+                };
+            } else {
+                setElements(prev => prev.filter(e => e.id !== newId));
+            }
+        } catch (e) {
+            console.error('Vector redraw failed:', e);
+            setElements(prev => prev.filter(e => e.id !== newId));
+        }
     };
 
     // Touch Edit Handler
@@ -771,25 +875,12 @@ const Workspace: React.FC = () => {
 
             if (resultUrl) {
                 setElements(prev => prev.map(el => el.id === id ? { ...el, isGenerating: false, url: resultUrl } : el));
-
-                // 同步结果到消息列表，使其出现在已生成文件列表中
-                addMessage({
-                    id: Date.now().toString(),
-                    role: 'model',
-                    text: `已为您完成智能生成：${prompt.slice(0, 30)}${prompt.length > 30 ? '...' : ''}`,
-                    timestamp: Date.now(),
-                    agentData: {
-                        model: activeImageModel,
-                        title: '智能生成',
-                        imageUrls: [resultUrl]
-                    }
-                });
             } else {
                 setElements(prev => prev.map(el => el.id === id ? { ...el, isGenerating: false } : el));
             }
         } catch (e) {
             console.error("Smart gen failed", e);
-            setElements(prev => prev.map(el => el.id === id ? { ...el, isGenerating: false } : el));
+            setElements(prev => prev.map(el => el.id === id ? { ...el, isGenerating: false } : e));
         }
     };
 
@@ -858,6 +949,7 @@ const Workspace: React.FC = () => {
                 enableWebSearch: isWeb,
                 creationMode,
                 preferredAspectRatio: creationMode === 'video' ? videoGenRatio : imageGenRatio,
+                skillData,
             };
 
             // 4. 调用 Orchestrator 处理任务
@@ -976,13 +1068,16 @@ const Workspace: React.FC = () => {
 
     // 选中画布元素时，自动将图片插入输入框（在光标位置插入，用户手动删 chip）
     const prevSelectedIdsRef = useRef<string[]>([]);
+    const pendingPickRequestRef = useRef(0);
     useEffect(() => {
         // 合并单选和多选
         const ids = selectedElementIds.length > 0 ? selectedElementIds : (selectedElementId ? [selectedElementId] : []);
         const prev = prevSelectedIdsRef.current;
-        
+
         // 只有 Agent 模式下才执行画布图片自动插入/清除逻辑
         if (creationMode !== 'agent') {
+            pendingPickRequestRef.current += 1;
+            setPendingAttachment(null);
             prevSelectedIdsRef.current = ids;
             return;
         }
@@ -992,6 +1087,7 @@ const Workspace: React.FC = () => {
 
         // 取消全部选中时 → 清除自动插入的画布图片 chip
         if (ids.length === 0 && prev.length > 0) {
+            pendingPickRequestRef.current += 1;
             const currentBlocks = useAgentStore.getState().inputBlocks;
             const filtered = currentBlocks.filter(b => {
                 if (b.type !== 'file' || !b.file) return true;
@@ -999,6 +1095,7 @@ const Workspace: React.FC = () => {
                 return true;
             });
             setInputBlocks(normalizeInputBlocks(filtered));
+            setPendingAttachment(null);
             prevSelectedIdsRef.current = ids;
             return;
         }
@@ -1010,31 +1107,39 @@ const Workspace: React.FC = () => {
         const newIds = ids.filter(id => !prev.includes(id));
         if (newIds.length === 0) return;
 
-        // 只添加新选中的图片（已经在 inputBlocks 里的不重复添加）
-        const currentBlocks = useAgentStore.getState().inputBlocks;
-        const existingElIds = new Set(
-            currentBlocks.filter(b => b.type === 'file' && b.file && (b.file as any)._canvasElId)
-                .map(b => (b.file as any)._canvasElId)
-        );
-        const imageEls = elements.filter(e => newIds.includes(e.id) && !existingElIds.has(e.id) && (e.type === 'image' || e.type === 'gen-image') && e.url);
+        // 软选中：只保留最后一个 pending，点击新图时替换
+        const imageEls = elements.filter(e => newIds.includes(e.id) && (e.type === 'image' || e.type === 'gen-image') && e.url);
         if (imageEls.length === 0) return;
 
-        // 用 insertInputFile 在光标位置插入
+        const targetEl = imageEls[imageEls.length - 1];
+        const requestId = pendingPickRequestRef.current + 1;
+        pendingPickRequestRef.current = requestId;
+
+        // 画布软选中预览（pending），不直接插入输入流
         (async () => {
-            for (const el of imageEls) {
-                try {
-                    const resp = await fetch(el.url!);
-                    const blob = await resp.blob();
-                    const file = new File([blob], `canvas-${el.id.slice(-6)}.png`, { type: blob.type || 'image/png' }) as any;
-                    file._canvasAutoInsert = true;
-                    file._canvasElId = el.id;
-                    file._canvasWidth = el.width;
-                    file._canvasHeight = el.height;
-                    insertInputFile(file);
-                } catch (_) { /* ignore */ }
+            try {
+                const resp = await fetch(targetEl.url!);
+                const blob = await resp.blob();
+                if (pendingPickRequestRef.current !== requestId) return;
+                const file = new File([blob], `canvas-${targetEl.id.slice(-6)}.png`, { type: blob.type || 'image/png' }) as any;
+                file._canvasAutoInsert = true;
+                file._canvasElId = targetEl.id;
+                file._canvasWidth = targetEl.width;
+                file._canvasHeight = targetEl.height;
+                file._attachmentId = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+                if (pendingPickRequestRef.current !== requestId) return;
+                setPendingAttachment({
+                    id: file._attachmentId,
+                    file,
+                    source: 'canvas',
+                    canvasElId: targetEl.id,
+                });
+            } catch (_) {
+                // ignore
             }
         })();
-    }, [selectedElementIds, selectedElementId, creationMode, elements]);
+    }, [selectedElementIds, selectedElementId, creationMode, elements, setPendingAttachment]);
 
     // Text Edit Feature State
     const [showTextEditModal, setShowTextEditModal] = useState(false);
@@ -1930,34 +2035,6 @@ const Workspace: React.FC = () => {
                     const update2 = elements.map(e => e.id === elementId ? { ...e, isGenerating: false, url: resultUrl } : e);
                     setElements(update2);
                     saveToHistory(update2, markers);
-
-                    // 同步结果到消息列表，将其转为 base64 以保证刷新后不丢失
-                    let persistentUrl = resultUrl;
-                    if (resultUrl.startsWith('blob:')) {
-                        try {
-                            const res = await fetch(resultUrl);
-                            const blob = await res.blob();
-                            persistentUrl = await new Promise<string>((resolve) => {
-                                const reader = new FileReader();
-                                reader.onloadend = () => resolve(reader.result as string);
-                                reader.readAsDataURL(blob);
-                            });
-                        } catch (err) {
-                            console.error("Failed to convert generated image blob to base64 for chat history", err);
-                        }
-                    }
-
-                    addMessage({
-                        id: Date.now().toString(),
-                        role: 'model',
-                        text: `已完成图片生成：${el.genPrompt.slice(0, 30)}${el.genPrompt.length > 30 ? '...' : ''}`,
-                        timestamp: Date.now(),
-                        agentData: {
-                            model: el.genModel || 'Nano Banana Pro',
-                            title: '生成图片',
-                            imageUrls: [persistentUrl]
-                        }
-                    });
                 };
             } else {
                 const updateFail = elements.map(e => e.id === elementId ? { ...e, isGenerating: false } : e);
@@ -2017,35 +2094,6 @@ const Workspace: React.FC = () => {
                 const update2 = elements.map(e => e.id === elementId ? { ...e, isGenerating: false, url: resultUrl } : e);
                 setElements(update2);
                 saveToHistory(update2, markers);
-
-                // Convert video blob to base64 for persistent chat storage
-                let persistentUrl = resultUrl;
-                if (resultUrl.startsWith('blob:')) {
-                    try {
-                        const res = await fetch(resultUrl);
-                        const blob = await res.blob();
-                        persistentUrl = await new Promise<string>((resolve) => {
-                            const reader = new FileReader();
-                            reader.onloadend = () => resolve(reader.result as string);
-                            reader.readAsDataURL(blob);
-                        });
-                    } catch (err) {
-                        console.error("Failed to convert generated video blob to base64 for chat history", err);
-                    }
-                }
-
-                // 同步结果到消息列表，使其出现在已生成文件列表中
-                addMessage({
-                    id: Date.now().toString(),
-                    role: 'model',
-                    text: `已完成视频生成：${el.genPrompt.slice(0, 30)}${el.genPrompt.length > 30 ? '...' : ''}`,
-                    timestamp: Date.now(),
-                    agentData: {
-                        model: el.genModel || 'Veo 3.1 Fast',
-                        title: '生成视频',
-                        videoUrls: [persistentUrl]
-                    }
-                });
             } else {
                 const updateFail = elements.map(e => e.id === elementId ? { ...e, isGenerating: false } : e);
                 setElements(updateFail);
@@ -2262,10 +2310,10 @@ const Workspace: React.FC = () => {
     const handleContextMenu = (e: React.MouseEvent) => { e.preventDefault(); setContextMenu({ x: e.clientX, y: e.clientY }); };
     // Wheel handled by native listener in useEffect
     const handleMouseDown = (e: React.MouseEvent) => {
+        if (contextMenu) setContextMenu(null);
         const target = e.target as HTMLElement;
         // 冗余解选逻辑已移动到 handleGlobalMouseDown (捕获阶段)
         // 此处不再进行强制解选，以免干扰 handleMouseMove 中的框选逻辑
-        if (contextMenu) setContextMenu(null);
 
         // 处理平移 (Pan) 逻辑
         if (activeTool === 'hand' || e.button === 1 || (e.button === 0 && isSpacePressed)) {
@@ -2581,10 +2629,14 @@ const Workspace: React.FC = () => {
                             const trimmed = name.trim().slice(0, 10);
                             if (trimmed && trimmed !== 'Could not analyze selection.' && trimmed !== 'Analysis failed.') {
                                 (file as any).markerName = trimmed;
+                                (file as any).lastAiAnalysis = trimmed;
                                 // 触发 inputBlocks 重新渲染
                                 setInputBlocks([...useAgentStore.getState().inputBlocks]);
+                                // 同步更新 markers 状态中的 analysis
+                                setMarkers(prev => prev.map(m => m.id === newMarkerId ? { ...m, analysis: trimmed } : m));
                             }
                         }).catch(() => { });
+
                     }
                 }
             } catch (err) {
@@ -2686,7 +2738,25 @@ const Workspace: React.FC = () => {
         setResizeHandle(handle);
         setResizeStart({ x: e.clientX, y: e.clientY, width: el.width, height: el.height, left: el.x, top: el.y });
     };
+    const handleSaveMarkerLabel = (markerId: string, label: string) => {
+        const newMarkers = markers.map(m => m.id === markerId ? { ...m, label } : m);
+        setMarkers(newMarkers);
+        saveToHistory(elements, newMarkers);
+        setEditingMarkerId(null);
+
+        // 同步更新侧边栏 Chip名称
+        const currentBlocks = useAgentStore.getState().inputBlocks;
+        const newBlocks = currentBlocks.map(b => {
+            if (b.type === 'file' && b.file && (b.file as any).markerId === markerId) {
+                (b.file as any).markerName = label || (b.file as any).lastAiAnalysis || '识别中...';
+            }
+            return b;
+        });
+        setInputBlocks([...newBlocks]);
+    };
+
     const removeMarker = (id: string) => {
+
         const newMarkers = markers.filter(m => m.id !== id);
         setMarkers(newMarkers);
         saveToHistory(elements, newMarkers);
@@ -3146,9 +3216,9 @@ const Workspace: React.FC = () => {
             <>
                 <div id="active-floating-toolbar" className={`absolute z-50 ${isDraggingElement ? '' : 'animate-in fade-in zoom-in-95 duration-200'} pointer-events-auto origin-top-left`} style={{ left: rightToolbarLeft, top: topToolbarTop, transform: `scale(${flexibleScale})` }} onMouseDown={(e) => e.stopPropagation()}>
                     <div
-                        className={`flex flex-col bg-white rounded-[16px] p-2 shadow-[0_4px_24px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)] border border-gray-100/80 items-stretch gap-0.5 transition-all duration-300 ease-out overflow-hidden ${toolbarExpanded ? 'w-[150px]' : 'w-[48px]'}`}
+                        className={`flex flex-col bg-white rounded-[16px] p-2 shadow-[0_4px_24px_rgba(0,0,0,0.06),0_1px_3px_rgba(0,0,0,0.04)] border border-gray-100/80 items-stretch gap-0.5 transition-all duration-300 ease-out ${toolbarExpanded ? 'w-[150px]' : 'w-[48px]'}`}
                         onMouseEnter={() => { toolbarExpandTimer.current = setTimeout(() => setToolbarExpanded(true), 800); }}
-                        onMouseLeave={() => { if (toolbarExpandTimer.current) clearTimeout(toolbarExpandTimer.current); setToolbarExpanded(false); setUpscaleMenuOpen(false); }}
+                        onMouseLeave={() => { if (toolbarExpandTimer.current) clearTimeout(toolbarExpandTimer.current); setToolbarExpanded(false); }}
                     >
                         {/* 快捷编辑 - XC logo */}
                         <div onClick={() => setShowFastEdit(true)} className={`flex items-center gap-2.5 px-2 py-1.5 rounded-[10px] cursor-pointer transition-all hover:bg-gray-50 ${toolbarExpanded ? 'justify-between' : 'justify-center'}`}>
@@ -3161,15 +3231,95 @@ const Workspace: React.FC = () => {
 
                         {/* 放大 HD */}
                         <div className="relative">
-                            <button onClick={() => setUpscaleMenuOpen(!upscaleMenuOpen)} className={`w-full flex items-center gap-2.5 px-2 py-1.5 text-gray-600 hover:bg-gray-50 rounded-[10px] transition-colors ${toolbarExpanded ? '' : 'justify-center'}`}>
+                            <button
+                                onClick={() => {
+                                    setShowUpscalePanel(!showUpscalePanel);
+                                    setToolbarExpanded(false);
+                                }}
+                                className={`w-full flex items-center gap-2.5 px-2 py-1.5 text-gray-600 hover:bg-gray-50 rounded-[10px] transition-colors ${toolbarExpanded ? '' : 'justify-center'} ${showUpscalePanel ? 'bg-gray-100 text-black' : ''}`}
+                            >
                                 <div className="border-[1.5px] border-current rounded-[3px] w-4 h-4 flex items-center justify-center text-[8px] font-black tracking-tighter flex-shrink-0">HD</div>
                                 {toolbarExpanded && <span className="text-[13px] whitespace-nowrap">放大</span>}
                             </button>
-                            {upscaleMenuOpen && (
-                                <div className="absolute top-0 left-full ml-2 bg-white rounded-xl shadow-xl border border-gray-100 p-1.5 flex flex-col gap-0.5 w-32 overflow-hidden z-[70] animate-in slide-in-from-left-2">
-                                    <button onClick={() => handleUpscaleSelect(2)} className="text-left px-3 py-2 text-sm hover:bg-gray-50 text-gray-700 rounded-lg flex justify-between items-center group"><span>2x (2K)</span><span className="text-[10px] text-gray-400 group-hover:text-gray-600">Standard</span></button>
-                                    <button onClick={() => handleUpscaleSelect(4)} className="text-left px-3 py-2 text-sm hover:bg-gray-50 text-gray-700 rounded-lg font-medium flex justify-between items-center"><span>4x (4K)</span><Sparkles size={12} className="text-blue-500" /></button>
-                                    <button onClick={() => handleUpscaleSelect(8)} className="text-left px-3 py-2 text-sm hover:bg-gray-50 text-gray-700 rounded-lg font-medium flex justify-between items-center"><span>8x (Ultra)</span><span className="text-[10px] uppercase text-blue-500 border border-blue-200 bg-blue-50 px-1 rounded">Pro</span></button>
+
+                            {showUpscalePanel && (
+                                <div
+                                    className="absolute top-0 left-full ml-2 bg-white rounded-2xl shadow-[0_8px_32px_rgba(0,0,0,0.12)] border border-gray-100 p-4 z-[70] w-64 animate-in slide-in-from-left-2 duration-200 flex flex-col gap-4"
+                                    onMouseDown={(e) => e.stopPropagation()}
+                                >
+                                    <div className="flex justify-between items-center">
+                                        <span className="text-sm font-bold text-gray-900">高清放大</span>
+                                        <button onClick={() => setShowUpscalePanel(false)} className="text-gray-400 hover:text-black transition">
+                                            <X size={14} />
+                                        </button>
+                                    </div>
+
+                                    {/* 分辨率选择 */}
+                                    <div className="flex flex-col gap-1.5">
+                                        <span className="text-[11px] font-bold text-gray-400 uppercase tracking-wider px-1">生成尺寸</span>
+                                        <div className="relative">
+                                            <button
+                                                onClick={() => setShowUpscaleResDropdown(!showUpscaleResDropdown)}
+                                                className="w-full flex items-center justify-between px-3 py-2.5 bg-gray-50 border border-gray-100 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-100 transition"
+                                            >
+                                                <div className="flex items-center gap-2">
+                                                    <span className="font-bold">{selectedUpscaleRes}</span>
+                                                    <span className="text-[10px] text-gray-400 font-normal">
+                                                        {(() => {
+                                                            const factor = selectedUpscaleRes === '2K' ? 2 : selectedUpscaleRes === '4K' ? 4 : 8;
+                                                            return `${Math.round(el.width * factor)}x${Math.round(el.height * factor)}`;
+                                                        })()}
+                                                    </span>
+                                                </div>
+                                                <ChevronDown size={14} className={`text-gray-400 transition-transform ${showUpscaleResDropdown ? 'rotate-180' : ''}`} />
+                                            </button>
+
+                                            {showUpscaleResDropdown && (
+                                                <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-xl shadow-xl border border-gray-100 p-1 z-10 overflow-hidden">
+                                                    {(['2K', '4K', '8K'] as const).map((res) => (
+                                                        <button
+                                                            key={res}
+                                                            onClick={() => {
+                                                                setSelectedUpscaleRes(res);
+                                                                setShowUpscaleResDropdown(false);
+                                                            }}
+                                                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm transition ${selectedUpscaleRes === res ? 'bg-blue-50 text-blue-600 font-bold' : 'text-gray-600 hover:bg-gray-50'}`}
+                                                        >
+                                                            <div className="flex items-center gap-2">
+                                                                <span>{res}</span>
+                                                                <span className="text-[10px] text-gray-400 font-normal">
+                                                                    {(() => {
+                                                                        const factor = res === '2K' ? 2 : res === '4K' ? 4 : 8;
+                                                                        return `${Math.round(el.width * factor)}x${Math.round(el.height * factor)}`;
+                                                                    })()}
+                                                                </span>
+                                                            </div>
+                                                            {selectedUpscaleRes === res && <Check size={14} />}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <div className="flex gap-2 mt-1">
+                                            <button
+                                                onClick={() => setShowUpscalePanel(false)}
+                                                className="flex-1 py-2 text-xs font-bold text-gray-500 hover:bg-gray-50 rounded-xl transition border border-gray-100"
+                                            >
+                                                Cancel
+                                            </button>
+                                            <button
+                                                onClick={() => {
+                                                    const factor = selectedUpscaleRes === '2K' ? 2 : selectedUpscaleRes === '4K' ? 4 : 8;
+                                                    handleUpscaleSelect(factor);
+                                                    setShowUpscalePanel(false);
+                                                }}
+                                                className="flex-1 py-2 bg-gray-900 text-white text-xs font-bold rounded-xl hover:bg-black transition shadow-sm"
+                                            >
+                                                Run
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -3206,7 +3356,7 @@ const Workspace: React.FC = () => {
 
                         {/* 多角度 */}
                         <button className={`w-full flex items-center gap-2.5 px-2 py-1.5 text-gray-600 hover:bg-gray-50 rounded-[10px] transition-colors relative ${toolbarExpanded ? '' : 'justify-center'}`}>
-                            <div className="relative flex-shrink-0"><Box size={16} strokeWidth={2} /><span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-blue-500 rounded-full"></span></div>
+                            <div className="relative flex-shrink-0"><Box size={16} strokeWidth={2} /></div>
                             {toolbarExpanded && <span className="text-[13px] whitespace-nowrap">多角度</span>}
                         </button>
 
@@ -3218,7 +3368,7 @@ const Workspace: React.FC = () => {
 
                         {/* 调整 */}
                         <button className={`w-full flex items-center gap-2.5 px-2 py-1.5 text-gray-600 hover:bg-gray-50 rounded-[10px] transition-colors relative ${toolbarExpanded ? '' : 'justify-center'}`}>
-                            <div className="relative flex-shrink-0"><MonitorUp size={16} strokeWidth={2} className="rotate-90" /><span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-blue-500 rounded-full"></span></div>
+                            <div className="relative flex-shrink-0"><MonitorUp size={16} strokeWidth={2} className="rotate-90" /></div>
                             {toolbarExpanded && <span className="text-[13px] whitespace-nowrap">调整</span>}
                         </button>
 
@@ -3229,12 +3379,11 @@ const Workspace: React.FC = () => {
                         </button>
 
                         {/* 矢量 */}
-                        <button className={`w-full flex items-center gap-2.5 px-2 py-1.5 text-gray-600 hover:bg-gray-50 rounded-[10px] transition-colors relative ${toolbarExpanded ? '' : 'justify-center'}`}>
-                            <div className="relative flex-shrink-0"><Scaling size={16} strokeWidth={2} /><span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 bg-blue-500 rounded-full"></span></div>
+                        <button onClick={handleVectorRedraw} className={`w-full flex items-center gap-2.5 px-2 py-1.5 text-gray-600 hover:bg-gray-50 rounded-[10px] transition-colors relative ${toolbarExpanded ? '' : 'justify-center'}`}>
+                            <div className="relative flex-shrink-0"><Scaling size={16} strokeWidth={2} /></div>
                             {toolbarExpanded && <span className="text-[13px] whitespace-nowrap">矢量</span>}
                         </button>
 
-                        {/* divider */}
                         <div className="h-px bg-gray-100 mx-1 my-0.5"></div>
 
                         {/* 下载 */}
@@ -4053,6 +4202,7 @@ const Workspace: React.FC = () => {
                         showVideoSettingsDropdown={showVideoSettingsDropdown}
                         setShowVideoSettingsDropdown={setShowVideoSettingsDropdown}
                         markers={markers}
+                        onSaveMarkerLabel={handleSaveMarkerLabel}
                     />
                 )}
             </AnimatePresence>
@@ -4063,10 +4213,10 @@ const Workspace: React.FC = () => {
                   样式为一个外圈圆框内含一个精准定位的小蓝点 
                 */}
                 {isCtrlPressed && (
-                    <div 
+                    <div
                         className="fixed pointer-events-none z-[99999] w-[24px] h-[24px] -ml-[12px] -mt-[12px] border-2 border-blue-500 rounded-full flex items-center justify-center transition-transform duration-75"
-                        style={{ 
-                            left: 'var(--mouse-x, 0)', 
+                        style={{
+                            left: 'var(--mouse-x, 0)',
                             top: 'var(--mouse-y, 0)',
                             background: 'rgba(59, 130, 246, 0.1)'
                         }}
@@ -4098,27 +4248,27 @@ const Workspace: React.FC = () => {
 
                 <ToolbarBottom leftPanelMode={leftPanelMode} setLeftPanelMode={setLeftPanelMode} zoom={zoom} setZoom={setZoom} />
 
-                <div 
-                    ref={containerRef} 
-                    className="flex-1 overflow-hidden relative bg-[#E8E8E8] w-full h-full select-none" 
-                    onContextMenu={handleContextMenu} 
-                    onMouseDown={handleMouseDown} 
+                <div
+                    ref={containerRef}
+                    className="flex-1 overflow-hidden relative bg-[#E8E8E8] w-full h-full select-none"
+                    onContextMenu={handleContextMenu}
+                    onMouseDown={handleMouseDown}
                     onMouseMove={(e) => {
                         handleMouseMove(e);
                         document.documentElement.style.setProperty('--mouse-x', `${e.clientX}px`);
                         document.documentElement.style.setProperty('--mouse-y', `${e.clientY}px`);
-                    }} 
-                    onMouseUp={handleMouseUp} 
-                    onMouseLeave={handleMouseUp} 
-                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }} 
-                    onDrop={handleCanvasDrop} 
-                    style={{ 
+                    }}
+                    onMouseUp={handleMouseUp}
+                    onMouseLeave={handleMouseUp}
+                    onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; }}
+                    onDrop={handleCanvasDrop}
+                    style={{
                         cursor: (creationMode === 'image' && isPickingFromCanvas)
                             ? 'crosshair'
                             : (isCtrlPressed || activeTool === 'mark')
                                 ? 'none'
-                                : ((activeTool === 'hand' || isPanning || isSpacePressed) ? (isPanning ? 'grabbing' : 'grab') : 'default'), 
-                        WebkitUserSelect: 'none' 
+                                : ((activeTool === 'hand' || isPanning || isSpacePressed) ? (isPanning ? 'grabbing' : 'grab') : 'default'),
+                        WebkitUserSelect: 'none'
                     }}
                 >
                     {renderToolbar()}
@@ -4180,20 +4330,20 @@ const Workspace: React.FC = () => {
                                 }
 
                                 return (
-                                    <div 
-                                        key={el.id} 
-                                        id={`canvas-el-${el.id}`} 
-                                        className={`absolute group ${isSelected && el.type !== 'text' ? 'ring-2 ring-blue-500' : ''} ${isSelected && el.type === 'text' ? 'ring-1 ring-blue-500 ring-offset-2' : ''} ${isLocked ? 'pointer-events-none' : ''}`} 
-                                        style={{ 
-                                            left: el.x, 
-                                            top: el.y, 
-                                            width: el.type === 'text' ? 'auto' : el.width, 
-                                            height: el.type === 'text' ? 'auto' : el.height, 
-                                            zIndex: el.zIndex, 
-                                            cursor: (isCtrlPressed || activeTool === 'mark') ? 'none' : (activeTool === 'select' ? (isLocked ? 'default' : 'move') : 'default'), 
-                                            whiteSpace: el.type === 'text' ? 'nowrap' : 'normal' 
-                                        }} 
-                                        onMouseDown={(e) => !isLocked && handleElementMouseDown(e, el.id)} 
+                                    <div
+                                        key={el.id}
+                                        id={`canvas-el-${el.id}`}
+                                        className={`absolute group ${isSelected && el.type !== 'text' ? 'ring-2 ring-blue-500' : ''} ${isSelected && el.type === 'text' ? 'ring-1 ring-blue-500 ring-offset-2' : ''} ${isLocked ? 'pointer-events-none' : ''}`}
+                                        style={{
+                                            left: el.x,
+                                            top: el.y,
+                                            width: el.type === 'text' ? 'auto' : el.width,
+                                            height: el.type === 'text' ? 'auto' : el.height,
+                                            zIndex: el.zIndex,
+                                            cursor: (isCtrlPressed || activeTool === 'mark') ? 'none' : (activeTool === 'select' ? (isLocked ? 'default' : 'move') : 'default'),
+                                            whiteSpace: el.type === 'text' ? 'nowrap' : 'normal'
+                                        }}
+                                        onMouseDown={(e) => !isLocked && handleElementMouseDown(e, el.id)}
                                         onDoubleClick={() => { if (el.type === 'text') { setEditingTextId(el.id); } else if (el.url) { setPreviewUrl(el.url); } }}
                                     >
                                         {(isSelected || isDraggingElement) && editingTextId !== el.id && (<div className="absolute -top-8 right-0 bg-white shadow-md rounded-md p-1 cursor-pointer hover:bg-red-50 hover:text-red-500 z-50"><Trash2 size={14} onClick={(e) => { e.stopPropagation(); deleteSelectedElement(); }} /></div>)}
@@ -4305,7 +4455,30 @@ const Workspace: React.FC = () => {
                                                             </>
                                                         )}
                                                         <div className="flex-1 flex items-center justify-center relative group-hover:bg-blue-50/50 transition-colors">
-                                                            {el.isGenerating ? (<div className="flex flex-col items-center gap-4" style={{ transform: `scale(${100 / zoom})` }}> <Loader2 size={48} className="animate-spin text-blue-500" /> <span className="text-sm text-blue-400 font-medium whitespace-nowrap">Creating magic...</span> </div>) : (<div className="flex flex-col items-center gap-2 text-blue-200" style={{ transform: `scale(${100 / zoom})` }}> <ImageIcon size={48} strokeWidth={1.5} /> </div>)}
+                                                            {el.isGenerating ? (
+                                                                <div className="flex flex-col items-center gap-4" style={{ transform: `scale(${100 / zoom})` }}>
+                                                                    <div className="relative">
+                                                                        <Loader2 size={48} className="animate-spin text-blue-500" />
+                                                                        {el.generatingType === 'upscale' && (
+                                                                            <div className="absolute inset-0 flex items-center justify-center">
+                                                                                <ImageIcon size={20} className="text-blue-500 opacity-50" />
+                                                                            </div>
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="flex flex-col items-center gap-1">
+                                                                        <span className="text-sm text-blue-500 font-bold whitespace-nowrap">
+                                                                            {el.generatingType === 'upscale' ? '高清放大中' :
+                                                                                el.generatingType === 'vector' ? '矢量线稿中' :
+                                                                                    el.generatingType === 'remove-bg' ? '背景移除中' : '正在处理中'}
+                                                                        </span>
+                                                                        <span className="text-[10px] text-blue-400 opacity-70 animate-pulse">Creating magic...</span>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <div className="flex flex-col items-center gap-2 text-blue-200" style={{ transform: `scale(${100 / zoom})` }}>
+                                                                    <ImageIcon size={48} strokeWidth={1.5} />
+                                                                </div>
+                                                            )}
                                                         </div>
                                                     </>
                                                 )}
@@ -4417,13 +4590,18 @@ const Workspace: React.FC = () => {
                                             left: pixelX,
                                             top: pixelY,
                                             position: 'absolute',
-                                            zIndex: isHoveredInChat ? 60 : 50,
+                                            zIndex: editingMarkerId === marker.id ? 2000 : (isHoveredInChat ? 600 : 500),
                                             transform: `translate(-50%, -100%) scale(${inverseScale})`,
                                             transformOrigin: 'bottom center',
                                             pointerEvents: 'auto',
                                         }}
                                         className="group/marker cursor-pointer"
-                                        onClick={(e) => { e.stopPropagation(); setZoom(Math.max(100, zoom)); }}
+                                        onMouseDown={(e) => {
+                                            e.stopPropagation();
+                                            setZoom(Math.max(100, zoom));
+                                            setEditingMarkerId(marker.id);
+                                            setEditingMarkerLabel(marker.label || '');
+                                        }}
                                     >
                                         {/* 内层 motion.div：负责进入/退出/悬浮动画 */}
                                         <motion.div
@@ -4444,13 +4622,89 @@ const Workspace: React.FC = () => {
                                             <div className="w-0 h-0 border-l-[5px] border-l-transparent border-r-[5px] border-r-transparent border-t-[6px] border-t-[#3B82F6] -mt-[1px]"></div>
                                         </motion.div>
 
-                                        {/* Quick Edit Pill */}
+                                        {/* Hover Tooltip (Clean Label) */}
                                         <div
-                                            className="absolute left-full top-0 ml-2 bg-gray-900/95 backdrop-blur-md rounded-full shadow-[0_8px_20px_rgb(0,0,0,0.15)] border border-gray-700/50 px-3 py-1.5 whitespace-nowrap opacity-0 scale-95 origin-left group-hover/marker:opacity-100 group-hover/marker:scale-100 transition-all duration-300 delay-0 group-hover/marker:delay-[800ms] flex items-center gap-1.5 z-50"
+                                            className="absolute left-1/2 bottom-[110%] -translate-x-1/2 mb-1 bg-gray-900/90 backdrop-blur-sm px-2.5 py-1.5 rounded-xl shadow-2xl border border-white/10 opacity-0 group-hover/marker:opacity-100 transition-all duration-200 pointer-events-none whitespace-nowrap z-[60] scale-90 group-hover/marker:scale-100 origin-bottom"
                                         >
-                                            <span className="text-[11px] font-bold text-white tracking-wide">快捷编辑</span>
-                                            <span className="text-[10px] font-semibold text-gray-300 bg-gray-800 rounded-sm px-1.5 shadow-inner">Tab</span>
+                                            <span className="text-[12px] font-bold text-white tracking-wide">
+                                                {marker.label || marker.analysis || '识别中...'}
+                                            </span>
                                         </div>
+
+                                        {/* Marker Edit Popover */}
+                                        <AnimatePresence>
+                                            {editingMarkerId === marker.id && (
+                                                <motion.div
+                                                    initial={{ opacity: 0, scale: 0.9, y: 5 }}
+                                                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                                                    exit={{ opacity: 0, scale: 0.9, y: 5 }}
+                                                    className="absolute bottom-full left-1/2 -translate-x-1/2 mb-4 z-[100]"
+                                                    onClick={(e) => e.stopPropagation()}
+                                                    onMouseDown={(e) => e.stopPropagation()}
+                                                >
+                                                    <div className="bg-white rounded-[24px] shadow-[0_25px_60px_-15px_rgba(0,0,0,0.2)] border border-gray-100 p-4 min-w-[260px] flex flex-col gap-3.5">
+                                                        {/* Header */}
+                                                        <div className="flex items-center justify-between px-1">
+                                                            <span className="text-[12px] font-bold text-gray-400/80 tracking-tight">Object Marked</span>
+                                                            <button
+                                                                onClick={(e) => { e.stopPropagation(); setEditingMarkerId(null); }}
+                                                                className="text-gray-300 hover:text-gray-500 transition p-1 hover:bg-gray-100 rounded-full"
+                                                            >
+                                                                <X size={14} />
+                                                            </button>
+                                                        </div>
+
+                                                        {/* Preview Row */}
+                                                        <div className="flex items-center gap-3.5 bg-gray-50/80 rounded-[20px] p-2 pr-4 border border-gray-100/30">
+                                                            {marker.cropUrl ? (
+                                                                <img src={marker.cropUrl} className="w-12 h-12 rounded-[14px] object-cover shadow-sm border border-white" draggable={false} />
+                                                            ) : (
+                                                                <div className="w-12 h-12 rounded-[14px] bg-gray-200 flex items-center justify-center">
+                                                                    <ImageIcon size={20} className="text-gray-400" />
+                                                                </div>
+                                                            )}
+                                                            <div className="flex flex-col">
+                                                                <span className="text-[15px] font-extrabold text-gray-800 leading-tight">
+                                                                    {marker.analysis || '识别中...'}
+                                                                </span>
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Input Row */}
+                                                        <div className="flex items-center gap-2.5 px-0.5">
+                                                            <div className="w-10 h-10 flex items-center justify-center bg-gray-100/80 rounded-[14px] text-gray-400 shrink-0">
+                                                                <MapPin size={20} className="opacity-50" />
+                                                                <div className="absolute w-[8px] h-[1.5px] bg-gray-400/40 bottom-2.5 rounded-full"></div>
+                                                            </div>
+                                                            <div className="flex-1 relative">
+                                                                <input
+                                                                    autoFocus
+                                                                    className="w-full h-10 pl-3.5 pr-10 bg-white border border-gray-200/80 rounded-[14px] text-[14px] font-bold text-gray-700 outline-none focus:ring-[5px] focus:ring-blue-500/5 focus:border-blue-500/50 transition-all placeholder:text-gray-300"
+                                                                    placeholder={marker.analysis || "自定义名称..."}
+                                                                    value={editingMarkerLabel}
+                                                                    onChange={(e) => setEditingMarkerLabel(e.target.value)}
+                                                                    onKeyDown={(e) => {
+                                                                        if (e.key === 'Enter') {
+                                                                            handleSaveMarkerLabel(marker.id, editingMarkerLabel);
+                                                                        } else if (e.key === 'Escape') {
+                                                                            setEditingMarkerId(null);
+                                                                        }
+                                                                    }}
+                                                                />
+                                                                <button
+                                                                    onClick={() => handleSaveMarkerLabel(marker.id, editingMarkerLabel)}
+                                                                    className="absolute right-1 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-gray-400 hover:text-blue-500 transition-colors"
+                                                                >
+                                                                    <Check size={20} strokeWidth={2.5} />
+                                                                </button>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                    {/* Arrow */}
+                                                    <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 w-0 h-0 border-l-[12px] border-l-transparent border-r-[12px] border-r-transparent border-t-[12px] border-t-white drop-shadow-[0_8px_8px_rgba(0,0,0,0.05)]"></div>
+                                                </motion.div>
+                                            )}
+                                        </AnimatePresence>
                                     </div>
                                 )
                             })}

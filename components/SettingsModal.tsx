@@ -90,7 +90,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     const [activeTab, setActiveTab] = useState<SettingsTab>('api');
     const imageHost = useImageHostStore();
     const [providers, setProviders] = useState<ApiProviderConfig[]>(getDefaultProviders());
-    const [activeProviderId, setActiveProviderId] = useState('gemini');
+    const [activeProviderId, setActiveProviderId] = useState('yunwu');
 
     const [replicateKey, setReplicateKey] = useState('');
     const [klingKey, setKlingKey] = useState('');

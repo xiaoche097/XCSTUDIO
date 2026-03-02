@@ -1,10 +1,11 @@
 
 import { GoogleGenAI, Chat, GenerateContentResponse, Part, Content, Type } from "@google/genai";
 import { ProviderError } from '../utils/provider-error';
+import { fetchWithResilience } from './http/api-client';
 
 // Helper to get API configurations
 export const getProviderConfig = () => {
-    const providerId = localStorage.getItem('api_provider') || 'gemini';
+    const providerId = localStorage.getItem('api_provider') || 'yunwu';
     const providersRaw = localStorage.getItem('api_providers');
 
     if (providersRaw) {
@@ -18,23 +19,23 @@ export const getProviderConfig = () => {
     }
 
     // Default Fallbacks for legacy/start
-    if (providerId === 'gemini') {
-        return {
-            id: 'gemini',
-            name: 'Gemini',
-            baseUrl: 'https://generativelanguage.googleapis.com',
-            apiKey: localStorage.getItem('gemini_api_key') || ''
-        };
-    } else if (providerId === 'yunwu') {
+    if (providerId === 'yunwu') {
         return {
             id: 'yunwu',
             name: 'Yunwu',
             baseUrl: 'https://yunwu.ai',
             apiKey: localStorage.getItem('yunwu_api_key') || ''
         };
+    } else if (providerId === 'gemini') {
+        return {
+            id: 'gemini',
+            name: 'Gemini',
+            baseUrl: 'https://generativelanguage.googleapis.com',
+            apiKey: localStorage.getItem('gemini_api_key') || ''
+        };
     }
 
-    return { id: 'gemini', apiKey: '' };
+    return { id: 'yunwu', apiKey: '' };
 };
 
 // Helper to get API Key dynamically
@@ -125,11 +126,11 @@ const fetchOpenAIJsonWithFallback = async <T>(
         const url = buildOpenAIUrl(baseUrl, path, authMode, apiKey);
         const headers = buildOpenAIHeaders(authMode, apiKey);
         console.log(`[${contextTag}] POST [${authMode}] ${url.replace(apiKey, '***')}`);
-        const res = await fetch(url, {
+        const res = await fetchWithResilience(url, {
             method: 'POST',
             headers,
             body: JSON.stringify(body),
-        });
+        }, { operation: `${contextTag}.openaiPost`, retries: 0 });
 
         if (res.ok) {
             return res.json();
@@ -149,6 +150,159 @@ const fetchOpenAIJsonWithFallback = async <T>(
     throw lastError || new Error(`${contextTag} API failed on all auth strategies`);
 };
 
+type UnifiedJsonGenerationOptions = {
+    model: string;
+    parts: Array<{ text?: string; inlineData?: { mimeType?: string; data?: string } }>;
+    temperature?: number;
+    responseSchema?: unknown;
+    tools?: unknown[];
+    operation?: string;
+};
+
+type OpenAIChatSession = {
+    __mode: 'openai';
+    model: string;
+    history: Content[];
+    systemInstruction: string;
+};
+
+type ChatSession = Chat | OpenAIChatSession;
+
+export type UnifiedJsonGenerationResult = {
+    text: string;
+    candidates?: any[];
+    raw?: any;
+};
+
+const toOpenAIMessageContent = (
+    parts: UnifiedJsonGenerationOptions['parts']
+): Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> => {
+    const content: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }> = [];
+
+    for (const part of parts || []) {
+        if (part?.text) {
+            content.push({ type: 'text', text: part.text });
+            continue;
+        }
+
+        const data = part?.inlineData?.data;
+        if (data) {
+            const mimeType = part.inlineData?.mimeType || 'image/png';
+            content.push({
+                type: 'image_url',
+                image_url: { url: `data:${mimeType};base64,${data}` }
+            });
+        }
+    }
+
+    return content;
+};
+
+const isImageInputUnsupportedError = (error: unknown): boolean => {
+    const msg = String((error as any)?.message || '').toLowerCase();
+    return msg.includes('does not support image input')
+        || msg.includes('model does not support image')
+        || msg.includes('image input is not supported')
+        || msg.includes('cannot read "image')
+        || msg.includes('invalid content type')
+        || msg.includes('image_url');
+};
+
+const stripImageContent = (
+    content: Array<{ type: 'text'; text: string } | { type: 'image_url'; image_url: { url: string } }>
+): Array<{ type: 'text'; text: string }> => {
+    const textOnly = content.filter((c) => c.type === 'text') as Array<{ type: 'text'; text: string }>;
+    if (textOnly.length > 0) return textOnly;
+    return [{ type: 'text', text: '用户上传了图片作为参考，请基于文本说明继续处理。' }];
+};
+
+export const generateJsonResponse = async (
+    options: UnifiedJsonGenerationOptions
+): Promise<UnifiedJsonGenerationResult> => {
+    const {
+        model,
+        parts,
+        temperature = 0.7,
+        responseSchema,
+        tools,
+        operation = 'generateJsonResponse'
+    } = options;
+
+    const provider = getProviderConfig();
+    const baseUrl = normalizeUrl(provider.baseUrl || '');
+    const isGoogleDirect = !baseUrl || baseUrl.includes('googleapis.com');
+
+    if (isGoogleDirect) {
+        const response = await getClient().models.generateContent({
+            model,
+            contents: { parts },
+            config: {
+                temperature,
+                responseMimeType: 'application/json',
+                ...(responseSchema ? { responseSchema } : {}),
+                ...(tools && tools.length > 0 ? { tools } : {})
+            }
+        });
+
+        return {
+            text: response.text || '{}',
+            candidates: response.candidates as any,
+            raw: response as any
+        };
+    }
+
+    const apiKey = getApiKey();
+    const openAIContent = toOpenAIMessageContent(parts);
+
+    const body = {
+        model,
+        temperature,
+        messages: [
+            {
+                role: 'user',
+                content: openAIContent
+            }
+        ],
+        response_format: { type: 'json_object' }
+    };
+
+    let data: any;
+    try {
+        data = await fetchOpenAIJsonWithFallback<any>(
+            baseUrl,
+            '/v1/chat/completions',
+            apiKey,
+            body,
+            operation
+        );
+    } catch (error) {
+        if (!isImageInputUnsupportedError(error)) throw error;
+
+        const fallbackBody = {
+            ...body,
+            messages: [
+                {
+                    role: 'user',
+                    content: stripImageContent(openAIContent)
+                }
+            ]
+        };
+        data = await fetchOpenAIJsonWithFallback<any>(
+            baseUrl,
+            '/v1/chat/completions',
+            apiKey,
+            fallbackBody,
+            `${operation}.textOnlyFallback`
+        );
+    }
+
+    return {
+        text: data?.choices?.[0]?.message?.content || '{}',
+        candidates: data?.choices || [],
+        raw: data
+    };
+};
+
 /**
  * Fetch available models from the provider, attempting all provided keys
  */
@@ -165,7 +319,7 @@ export const fetchAvailableModels = async (provider: string, keys: string[], bas
         try {
             const pricingUrl = `${rootUrl}/api/pricing_new`;
             console.log(`[fetchAvailableModels] [MemeFast] Fetching pricing metadata: ${pricingUrl}`);
-            const res = await fetch(pricingUrl);
+            const res = await fetchWithResilience(pricingUrl, {}, { operation: 'fetchAvailableModels.memeFastPricing', retries: 1 });
             if (res.ok) {
                 const json = await res.json();
                 const data = json.data || [];
@@ -211,7 +365,7 @@ export const fetchAvailableModels = async (provider: string, keys: string[], bas
             let keySucceeded = false;
             for (const plan of plans) {
                 console.log(`[fetchAvailableModels] [${provider}] Key #${i + 1} checking: ${plan.url}`);
-                const res = await fetch(plan.url, { headers: plan.headers });
+                const res = await fetchWithResilience(plan.url, { headers: plan.headers }, { operation: 'fetchAvailableModels.modelList', retries: 0 });
 
                 if (res.ok) {
                     const data = await res.json();
@@ -256,12 +410,24 @@ export const getBestModelId = (type: 'text' | 'image' | 'video' | 'thinking' = '
     const config = getProviderConfig();
     const isProxy = config.id !== 'gemini' || (config.baseUrl && !config.baseUrl.includes('googleapis.com'));
 
+    const getSelectedScriptModel = (): string | null => {
+        try {
+            const raw = localStorage.getItem('setting_script_models');
+            const selected = JSON.parse(raw || '[]');
+            if (!Array.isArray(selected)) return null;
+            const first = selected.find((m: unknown) => typeof m === 'string' && m.trim() && m !== 'Auto');
+            return typeof first === 'string' ? first : null;
+        } catch {
+            return null;
+        }
+    };
+
     if (type === 'image') {
         const s = localStorage.getItem('setting_image_models');
         const selected = JSON.parse(s || '[]');
         // 用户指定：自动选择模式下默认首选 Nano Banana Pro (gemini-3-pro-image-preview)
         if (selected.length === 0 || selected.includes('Auto')) return IMAGE_PRO_MODEL;
-        
+
         const first = selected[0];
         if (first === 'Nano Banana Pro') return IMAGE_PRO_MODEL;
         if (first === 'NanoBanana2') return IMAGE_NANOBANANA_2_MODEL;
@@ -278,28 +444,29 @@ export const getBestModelId = (type: 'text' | 'image' | 'video' | 'thinking' = '
     }
 
     if (type === 'thinking') {
-        // 用户要求思考模型用 gemini-3.1-pro-preview
-        return THINKING_MODEL;
+        const selected = getSelectedScriptModel();
+        return selected || THINKING_MODEL;
     }
 
-    // 常规对话/分析 (text)：用户要求用 gemini-3-flash-preview
-    return FLASH_MODEL;
+    const selectedTextModel = getSelectedScriptModel();
+    return selectedTextModel || FLASH_MODEL;
 };
 
 export const getClient = () => {
     const config: any = { apiKey: getApiKey() };
     let baseUrl = getApiUrl();
     if (baseUrl) {
-        // 核心修复：SDK 内部会自动拼装 v1/v1beta，这里必须移除任何结尾的版本路径
-        // 否则会产生 /v1beta/v1beta 的双重路径导致中转站 404
+        // SDK 内部会自动拼装 v1/v1beta，这里需要移除版本后缀以避免重复
         baseUrl = baseUrl.replace(/\/+$/, '').replace(/\/v\d+(beta)?$/i, '');
         config.httpOptions = { baseUrl };
-        console.log(`[GenAI] Using Cleaned Proxy: ${baseUrl}`);
+        console.log(`[GenAI] Active Proxy: ${baseUrl} (SDK will append version)`);
+    } else {
+        console.log(`[GenAI] Using direct Google endpoint`);
     }
     const client = new GoogleGenAI(config);
     (client as any).getBestModelId = getBestModelId;
     return client;
-};;
+};
 
 // Get base URL for video REST API (bypasses SDK's predictLongRunning endpoint)
 const getVideoBaseUrl = () => {
@@ -460,11 +627,11 @@ const generateVideoOpenAICompatible = async (
             const submitHeaders = buildOpenAIHeaders(authMode, apiKey);
             console.log(`[generateVideo/openai] POST [${authMode}] ${submitUrl.replace(apiKey, '***')}`);
 
-            const submitRes = await fetch(submitUrl, {
+            const submitRes = await fetchWithResilience(submitUrl, {
                 method: 'POST',
                 headers: submitHeaders,
                 body: JSON.stringify(requestBody),
-            });
+            }, { operation: 'generateVideo.openaiSubmit', retries: 0 });
 
             if (!submitRes.ok) {
                 const errText = await submitRes.text().catch(() => '');
@@ -500,7 +667,7 @@ const generateVideoOpenAICompatible = async (
                     try {
                         const pollUrl = buildOpenAIUrl(baseUrl, pollPath, authMode, apiKey);
                         const pollHeaders = buildOpenAIHeaders(authMode, apiKey);
-                        const pollRes = await fetch(pollUrl, { headers: pollHeaders });
+                        const pollRes = await fetchWithResilience(pollUrl, { headers: pollHeaders }, { operation: 'generateVideo.openaiPoll', retries: 1 });
                         if (!pollRes.ok) continue;
                         const pollData = await pollRes.json();
 
@@ -580,12 +747,8 @@ const extractStatusCode = (error: any): number | undefined => {
     return error?.status || error?.code || error?.httpCode;
 };
 
-export const createChatSession = (model: string = PRO_MODEL, history: Content[] = [], systemInstruction?: string): Chat => {
-    return getClient().chats.create({
-        model: model,
-        history: history,
-        config: {
-            systemInstruction: systemInstruction || `You are XcAISTUDIO, an expert AI design assistant. You help users create posters, branding, and design elements.
+export const createChatSession = (model: string = FLASH_MODEL, history: Content[] = [], systemInstruction?: string): Chat => {
+    const resolvedSystemInstruction = systemInstruction || `You are XcAISTUDIO, an expert AI design assistant. You help users create posters, branding, and design elements.
       
       CRITICAL OUTPUT RULE:
       When you suggest visual designs or when the user asks for a design plan, YOU MUST provide specific actionable generation options.
@@ -600,10 +763,29 @@ export const createChatSession = (model: string = PRO_MODEL, history: Content[] 
       }
       \`\`\`
       
-      You can output multiple blocks. Keep the "title" short.`,
-            temperature: 0.7
-        },
-    });
+      You can output multiple blocks. Keep the "title" short.`;
+
+    const provider = getProviderConfig();
+    const baseUrl = normalizeUrl(provider.baseUrl || '');
+    const isGoogleDirect = !baseUrl || baseUrl.includes('googleapis.com');
+
+    if (isGoogleDirect) {
+        return getClient().chats.create({
+            model: model,
+            history: history,
+            config: {
+                systemInstruction: resolvedSystemInstruction,
+                temperature: 0.7
+            },
+        });
+    }
+
+    return {
+        __mode: 'openai',
+        model,
+        history: history || [],
+        systemInstruction: resolvedSystemInstruction,
+    } as OpenAIChatSession as any;
 };
 
 export const fileToPart = async (file: File): Promise<Part> => {
@@ -649,7 +831,7 @@ export const fileToPart = async (file: File): Promise<Part> => {
 };
 
 export const sendMessage = async (
-    chat: Chat,
+    chat: ChatSession,
     message: string,
     attachments: File[] = [],
     enableWebSearch: boolean = false
@@ -670,19 +852,88 @@ export const sendMessage = async (
 
         if (parts.length === 0) return "";
 
+        const isOpenAIChat = (chat as OpenAIChatSession)?.__mode === 'openai';
+
+        if (isOpenAIChat) {
+            const openAIChat = chat as OpenAIChatSession;
+            const provider = getProviderConfig();
+            const baseUrl = normalizeUrl(provider.baseUrl || '');
+            const apiKey = getApiKey();
+
+            const openAIContent = toOpenAIMessageContent(parts as any);
+            const historyMessages = (openAIChat.history || []).flatMap((item) => {
+                const role = item.role === 'model' ? 'assistant' : 'user';
+                const textParts = (item.parts || [])
+                    .map((p: any) => (typeof p?.text === 'string' ? p.text : ''))
+                    .filter(Boolean)
+                    .join('\n');
+                if (!textParts) return [];
+                return [{ role, content: [{ type: 'text', text: textParts }] }];
+            });
+
+            const requestMessages: any[] = [
+                { role: 'system', content: [{ type: 'text', text: openAIChat.systemInstruction }] },
+                ...historyMessages,
+                { role: 'user', content: openAIContent },
+            ];
+
+            let response: any;
+            const primaryBody = {
+                model: openAIChat.model,
+                temperature: 0.7,
+                messages: requestMessages,
+            };
+
+            try {
+                response = await fetchOpenAIJsonWithFallback<any>(
+                    baseUrl,
+                    '/v1/chat/completions',
+                    apiKey,
+                    primaryBody,
+                    'sendMessage'
+                );
+            } catch (error) {
+                if (!isImageInputUnsupportedError(error)) throw error;
+
+                const fallbackMessages = requestMessages.map((m) => {
+                    if (m.role !== 'user') return m;
+                    return {
+                        ...m,
+                        content: stripImageContent(m.content || [])
+                    };
+                });
+
+                response = await fetchOpenAIJsonWithFallback<any>(
+                    baseUrl,
+                    '/v1/chat/completions',
+                    apiKey,
+                    {
+                        ...primaryBody,
+                        messages: fallbackMessages,
+                    },
+                    'sendMessage.textOnlyFallback'
+                );
+            }
+
+            const text = response?.choices?.[0]?.message?.content || 'I processed your request.';
+
+            openAIChat.history.push({ role: 'user', parts: [{ text: message }] } as any);
+            openAIChat.history.push({ role: 'model', parts: [{ text }] } as any);
+            return text;
+        }
+
         const config: any = {};
         if (enableWebSearch) {
             config.tools = [{ googleSearch: {} }];
         }
 
-        const result: GenerateContentResponse = await retryWithBackoff(() => chat.sendMessage({
+        const result: GenerateContentResponse = await retryWithBackoff(() => (chat as Chat).sendMessage({
             message: parts,
             config
         }));
 
         let text = result.text || "I processed your request.";
 
-        // Handle Grounding Metadata (Sources)
         const groundingChunks = result.candidates?.[0]?.groundingMetadata?.groundingChunks;
         if (groundingChunks && groundingChunks.length > 0) {
             const sources = groundingChunks
@@ -732,6 +983,43 @@ export const analyzeImageRegion = async (imageBase64: string): Promise<string> =
     } catch (error) {
         console.error("Analysis Error:", error);
         return "Could not analyze selection.";
+    }
+};
+
+/**
+ * Refines an image prompt by first analyzing the source image using a text model
+ * (Flash) and then returning a detailed description suitable for image generation.
+ */
+export const refineImagePrompt = async (imageBase64: string, frameworkPrompt: string): Promise<string> => {
+    try {
+        const matches = imageBase64.match(/^data:(.+);base64,(.+)$/);
+        if (!matches) throw new Error("Invalid base64 image");
+
+        console.log(`[refiningPrompt] Analyzing image with Flash model using framework...`);
+        const response = await retryWithBackoff<GenerateContentResponse>(() => getClient().models.generateContent({
+            model: FLASH_MODEL,
+            contents: {
+                parts: [
+                    {
+                        inlineData: {
+                            mimeType: matches[1],
+                            data: matches[2]
+                        }
+                    },
+                    {
+                        text: `${frameworkPrompt}\n\n请严格按上述框架深度解析此图，并在此解析的基础上输出一段用于 AI 绘画的高质量、细节极其丰富的英文提示词。`
+                    }
+                ]
+            }
+        }));
+
+        const resultText = response.text || "";
+        // Try to extract the prompt part if the model structured its response
+        // If not, use the whole text (it will be descriptive)
+        return resultText;
+    } catch (error) {
+        console.error("Prompt Refinement Error:", error);
+        throw error;
     }
 };
 
@@ -886,8 +1174,16 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
 
     const modelsToTry = [...new Set([targetModelId, IMAGE_FLASH_MODEL])];
 
+    const configProvider = getProviderConfig();
+    const isProxy = configProvider.id !== 'gemini' || (configProvider.baseUrl && !configProvider.baseUrl.includes('googleapis.com'));
+
     let validAspectRatio = config.aspectRatio;
-    const supported = ["1:1", "3:4", "4:3", "9:16", "16:9"];
+
+    // Expand supported ratios for proxy-based models (Yunwu, etc.)
+    const supported = isProxy
+        ? ["1:1", "3:4", "4:3", "9:16", "16:9", "21:9", "3:2", "2:3", "5:4", "4:5"]
+        : ["1:1", "3:4", "4:3", "9:16", "16:9"];
+
     if (!supported.includes(validAspectRatio)) {
         if (validAspectRatio === '21:9') validAspectRatio = '16:9';
         else if (validAspectRatio === '3:2') validAspectRatio = '16:9';
@@ -897,11 +1193,10 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
         else validAspectRatio = '1:1';
     }
 
-    const parts: any[] = [{ text: config.prompt }];
+    // Prepare parts: Image(s) should generally come before or alongside text for multimodal models
+    const parts: any[] = [];
 
-    // Handle multiple references (preferred) or single reference
     const imagesToProcess = config.referenceImages || (config.referenceImage ? [config.referenceImage] : []);
-
     for (const imgBase64 of imagesToProcess) {
         const matches = imgBase64.match(/^data:(.+);base64,(.+)$/);
         if (matches) {
@@ -913,6 +1208,8 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
             });
         }
     }
+
+    parts.push({ text: config.prompt });
 
     const imageConfig: any = {
         aspectRatio: validAspectRatio,
@@ -926,33 +1223,44 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
 
     for (const modelToUse of modelsToTry) {
         try {
-            console.log(`[generateImage] Trying model: ${modelToUse}`);
+            console.log(`[generateImage] Trying model: ${modelToUse} at ${getApiUrl()}`);
             const response = await retryWithBackoff<GenerateContentResponse>(() => getClient().models.generateContent({
                 model: modelToUse,
                 contents: { parts },
                 config: {
-                    responseModalities: ['TEXT', 'IMAGE'],
+                    // responseModalities removed for better compatibility with 1.5/Imagen models via proxies
                     imageConfig
                 }
             }));
 
-            for (const part of response.candidates?.[0]?.content?.parts || []) {
-                if (part.inlineData) {
-                    console.log(`[generateImage] Success with model: ${modelToUse}`);
-                    return `data:image/png;base64,${part.inlineData.data}`;
+            if (response.candidates?.[0]?.content?.parts) {
+                for (const part of response.candidates[0].content.parts) {
+                    if (part.inlineData) {
+                        console.log(`[generateImage] Success with model: ${modelToUse}`);
+                        return `data:image/png;base64,${part.inlineData.data}`;
+                    }
                 }
             }
-            // 没有图片数据但没报错 — 尝试下一个模型
-            console.warn(`[generateImage] No image data from ${modelToUse}, trying next model`);
+
+            // If we're here, no image data was found in the response
+            console.warn(`[generateImage] No image data in response from ${modelToUse}. Candidate:`, JSON.stringify(response.candidates?.[0]).slice(0, 500));
         } catch (error: any) {
             lastError = error;
             console.warn(`[generateImage] Model ${modelToUse} failed:`, error.message || error);
+            if (error.status === 401 || error.status === 403 || error.status === 429) {
+                // For Auth or Quota errors, don't try next model as it will likely fail too
+                break;
+            }
             // 继续尝试下一个模型
         }
     }
 
-    console.error("Image Generation Error: all models failed", lastError);
-    throw lastError || new Error('所有图片生成模型均不可用');
+    if (lastError) {
+        console.error("Image Generation Error: all models failed", lastError);
+    } else {
+        console.error("Image Generation Error: models returned successful response but no image data");
+    }
+    throw lastError || new Error('所有图片生成模型均不可用或返回数据异常');
 };
 
 export interface VideoGenerationConfig {
@@ -1037,11 +1345,11 @@ export const generateVideo = async (config: VideoGenerationConfig): Promise<stri
         const genRes = await retryWithBackoff(async () => {
             if (isGoogleDirect) {
                 console.log(`[generateVideo] POST ${directGoogleUrl.replace(apiKey, '***')}`);
-                const r = await fetch(directGoogleUrl, {
+                const r = await fetchWithResilience(directGoogleUrl, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body)
-                });
+                }, { operation: 'generateVideo.googleDirectSubmit', retries: 0 });
                 if (!r.ok) {
                     const errBody = await r.text();
                     const err: any = new Error(`generateVideos ${r.status}: ${errBody}`);
@@ -1066,7 +1374,7 @@ export const generateVideo = async (config: VideoGenerationConfig): Promise<stri
                     const headers = buildVideoHeaders(plan.authMode, apiKey);
                     console.log(`[generateVideo] POST [${plan.version}/${plan.authMode}] ${generateUrl.replace(apiKey, '***')}`);
 
-                    const r = await fetch(generateUrl, { method: 'POST', headers, body: JSON.stringify(body) });
+                    const r = await fetchWithResilience(generateUrl, { method: 'POST', headers, body: JSON.stringify(body) }, { operation: 'generateVideo.generateVideosSubmit', retries: 0 });
                     if (r.ok) {
                         generateContext = plan;
                         return r.json();
@@ -1135,7 +1443,7 @@ export const generateVideo = async (config: VideoGenerationConfig): Promise<stri
                 for (const plan of pollPlans) {
                     const pollUrl = buildVideoPollUrl(baseUrl, plan.version, operationName, plan.authMode, apiKey);
                     const pollHeaders = buildVideoHeaders(plan.authMode, apiKey);
-                    const pollRes = await fetch(pollUrl, { headers: pollHeaders });
+                    const pollRes = await fetchWithResilience(pollUrl, { headers: pollHeaders }, { operation: 'generateVideo.generateVideosPoll', retries: 1 });
 
                     if (!pollRes.ok) {
                         const errBody = await pollRes.text().catch(() => '');

@@ -40,46 +40,45 @@ export const MessageList: React.FC<MessageListProps> = ({ onSend, onSmartGenerat
     }, [messages, currentTask?.progressMessage]);
 
     return (
-        <div className="space-y-4 pb-4">
+        <div className="space-y-4 pb-4 px-4 md:px-6">
             {messages.map(msg => (
                 <motion.div
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     key={msg.id}
-                    className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                    className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
                 >
                     {msg.role === 'user' ? (
                         msg.skillData ? (
-                            <div className="max-w-[85%] rounded-[20px] rounded-tr-sm px-3 py-2 text-[13px] bg-gray-100 text-gray-800 flex flex-col gap-2 relative overflow-hidden group transition">
+                            <div className="w-full max-w-[85%] xl:max-w-[75%] rounded-3xl rounded-br-md border border-gray-200 bg-white px-4 py-3 text-[13px] text-gray-800 shadow-sm flex flex-col gap-2 overflow-hidden">
                                 <div className="flex items-center gap-2">
-                                    <span className="font-semibold">{msg.skillData.name}</span>
+                                    <span className="font-semibold text-gray-900">{msg.skillData.name}</span>
                                 </div>
                                 {msg.attachments && msg.attachments.length > 0 && (
-                                    <div className={`grid gap-1.5 ${msg.attachments.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                                    <div className={`grid gap-2 ${msg.attachments.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
                                         {msg.attachments.map((att, i) => (
-                                            <img key={i} src={att} className="rounded-lg border border-gray-100 object-cover object-center w-full max-h-20" />
+                                            <div key={i} className="w-full rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+                                                <img src={att} className="w-full h-auto object-cover rounded-lg" />
+                                            </div>
                                         ))}
                                     </div>
                                 )}
-                                <div className="text-xs text-gray-400 bg-gray-50 px-2.5 py-2 rounded-xl border border-gray-100/50 whitespace-nowrap overflow-hidden text-ellipsis max-w-full" title={msg.text}>
+                                <div className="text-[13px] text-gray-700 leading-relaxed whitespace-pre-wrap break-words" title={msg.text}>
                                     {msg.text}
                                 </div>
                             </div>
                         ) : (
-                            <div className="flex flex-col items-end gap-1 mb-2">
-                                <div className="max-w-[90%] rounded-2xl bg-[#F4F4F5] px-3 py-1.5 flex flex-wrap items-center gap-2">
-                                    {msg.attachments && msg.attachments.length > 0 && (
-                                        <div className="flex flex-wrap gap-1">
-                                            {msg.attachments.map((att, i) => (
-                                                <div key={i} className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-lg pl-1 pr-2 py-0.5 shadow-sm">
-                                                    <img src={att} className="w-5 h-5 rounded-sm object-cover" />
-                                                    <span className="text-[10px] text-gray-500 font-medium whitespace-nowrap">资源 {i + 1}</span>
-                                                </div>
-                                            ))}
-                                        </div>
-                                    )}
-                                    <div className="text-[13px] text-gray-800 leading-tight whitespace-pre-wrap">{msg.text}</div>
-                                </div>
+                            <div className="w-full max-w-[85%] xl:max-w-[75%] rounded-3xl rounded-br-md border border-gray-200 bg-white px-4 py-3 shadow-sm flex flex-col gap-2 overflow-hidden">
+                                {msg.attachments && msg.attachments.length > 0 && (
+                                    <div className={`grid gap-2 ${msg.attachments.length === 1 ? 'grid-cols-1' : 'grid-cols-2'}`}>
+                                        {msg.attachments.map((att, i) => (
+                                            <div key={i} className="w-full rounded-lg overflow-hidden border border-gray-200 bg-gray-50">
+                                                <img src={att} className="w-full h-auto object-cover rounded-lg" />
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                                <div className="text-[13px] text-gray-800 leading-relaxed whitespace-pre-wrap break-words">{msg.text}</div>
                             </div>
                         )
                     ) : msg.error ? (
@@ -87,10 +86,10 @@ export const MessageList: React.FC<MessageListProps> = ({ onSend, onSmartGenerat
                             {msg.text}
                         </div>
                     ) : (
-                        <AgentMessage 
-                            message={msg} 
-                            onPreview={onPreview} 
-                            onAction={onSend} 
+                        <AgentMessage
+                            message={msg}
+                            onPreview={onPreview}
+                            onAction={onSend}
                             onSmartGenerate={onSmartGenerate}
                         />
                     )}

@@ -5,6 +5,7 @@ import {
     ThumbsUp, ThumbsDown, Copy, Check, Wand2, Image as ImageIcon
 } from 'lucide-react';
 import { ChatMessage } from '../../../types';
+import { MarkdownRenderer } from './MarkdownRenderer';
 
 interface AgentMessageProps {
     message: ChatMessage;
@@ -22,6 +23,12 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({ message, onPreview, 
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
     };
+
+    const normalizeEscapedNewlines = (value: string): string =>
+        (value || '')
+            .replace(/\r\n/g, '\n')
+            .replace(/\\r\\n/g, '\n')
+            .replace(/\\n/g, '\n');
 
     // 解析 json:generation 块
     const { cleanText, proposals } = useMemo(() => {
@@ -49,7 +56,7 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({ message, onPreview, 
             }
         }
 
-        const textWithoutProposals = message.text.replace(proposalRegex, '').trim();
+        const textWithoutProposals = normalizeEscapedNewlines(message.text.replace(proposalRegex, '').trim());
         return { cleanText: textWithoutProposals, proposals: foundProposals };
     }, [message.text, message.agentData]);
 
@@ -71,6 +78,37 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({ message, onPreview, 
             };
         });
     }, [agentData]);
+
+    const oneClickView = useMemo(() => {
+        if (message.skillData?.id !== 'xcai-oneclick' && message.text.indexOf('SKYSPER One-Click') === -1) return { intro: '', sections: [] as Array<{ title: string; body: string }> };
+        const sections: Array<{ title: string; body: string }> = [];
+        const lines = cleanText.split('\n');
+        const intro: string[] = [];
+        let currentTitle = '';
+        let currentBody: string[] = [];
+
+        const pushCurrent = () => {
+            if (currentTitle && currentBody.length > 0) {
+                sections.push({ title: currentTitle, body: currentBody.join('\n').trim() });
+            }
+        };
+
+        for (const rawLine of lines) {
+            const line = rawLine.trim();
+            if (/^##\s+/.test(line)) {
+                pushCurrent();
+                currentTitle = line.replace(/^##\s+/, '').trim();
+                currentBody = [];
+            } else if (!currentTitle) {
+                intro.push(rawLine);
+            } else if (currentTitle) {
+                currentBody.push(rawLine);
+            }
+        }
+
+        pushCurrent();
+        return { intro: intro.join('\n').trim(), sections };
+    }, [cleanText, message.skillData?.id, message.text]);
 
     return (
         <div className="w-full group">
@@ -95,12 +133,28 @@ export const AgentMessage: React.FC<AgentMessageProps> = ({ message, onPreview, 
                 )}
 
                 {/* 1. 引导文字 */}
-                {cleanText && (
-                    <div className="agent-msg-text text-[13px] text-gray-800 leading-[1.6] font-normal px-1 whitespace-pre-wrap break-words">
-                        {cleanText.split(/\n{2,}/).map((paragraph, idx) => (
-                            <p key={idx} className="mb-2 last:mb-0 whitespace-pre-wrap">
-                                {paragraph}
-                            </p>
+                {cleanText && oneClickView.sections.length === 0 && (
+                    <div className="agent-msg-text px-1 break-words">
+                        <MarkdownRenderer text={cleanText} className="text-[13px]" />
+                    </div>
+                )}
+
+                {oneClickView.sections.length > 0 && (
+                    <div className="px-1 mt-1 space-y-1.5">
+                        {oneClickView.intro && (
+                            <div className="rounded-lg border border-gray-200 bg-white/70 px-2.5 py-2">
+                                <MarkdownRenderer text={oneClickView.intro} className="text-[12px]" />
+                            </div>
+                        )}
+                        {oneClickView.sections.map((section, idx) => (
+                            <details key={`${section.title}-${idx}`} className="rounded-lg border border-gray-200 bg-white/90" open={idx < 2}>
+                                <summary className="cursor-pointer select-none px-2.5 py-2 text-[12px] font-semibold text-gray-800">
+                                    {section.title}
+                                </summary>
+                                <div className="border-t border-gray-100 px-2.5 py-2">
+                                    <MarkdownRenderer text={section.body} className="text-[12px]" />
+                                </div>
+                            </details>
                         ))}
                     </div>
                 )}

@@ -1,4 +1,5 @@
 import { ImageProvider, ImageGenerationRequest } from './types';
+import { fetchWithResilience } from '../http/api-client';
 
 const getReplicateKey = (): string => {
   return localStorage.getItem('replicate_api_key') || '';
@@ -16,9 +17,9 @@ async function pollPrediction(id: string, apiKey: string): Promise<any> {
   const maxAttempts = 60;
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise(r => setTimeout(r, 2000));
-    const res = await fetch(`https://api.replicate.com/v1/predictions/${id}`, {
+    const res = await fetchWithResilience(`https://api.replicate.com/v1/predictions/${id}`, {
       headers: { 'Authorization': `Bearer ${apiKey}` },
-    });
+    }, { operation: 'replicate.pollPrediction', retries: 1 });
     const data = await res.json();
     if (data.status === 'succeeded') return data;
     if (data.status === 'failed' || data.status === 'canceled') {
@@ -29,7 +30,7 @@ async function pollPrediction(id: string, apiKey: string): Promise<any> {
 }
 
 async function imageUrlToBase64(url: string): Promise<string> {
-  const res = await fetch(url);
+  const res = await fetchWithResilience(url, {}, { operation: 'replicate.imageUrlToBase64', retries: 1 });
   const blob = await res.blob();
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -77,14 +78,14 @@ export const replicateImageProvider: ImageProvider = {
       input.guidance_scale = 7.5;
     }
 
-    const res = await fetch('https://api.replicate.com/v1/predictions', {
+    const res = await fetchWithResilience('https://api.replicate.com/v1/predictions', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ version: version.includes(':') ? version.split(':')[1] : undefined, model: version.includes(':') ? undefined : version, input }),
-    });
+    }, { operation: 'replicate.createPrediction', retries: 1 });
 
     if (!res.ok) {
       const err = await res.json();

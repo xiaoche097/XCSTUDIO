@@ -4,6 +4,80 @@ import { immer } from 'zustand/middleware/immer';
 import { AgentTask, AgentType } from '../types/agent.types';
 import { ChatMessage, InputBlock, ImageModel, VideoModel } from '../types';
 
+export type AttachmentSource = 'canvas' | 'upload';
+
+export interface AttachmentItem {
+  id: string;
+  file: File;
+  source: AttachmentSource;
+  canvasElId?: string;
+}
+
+const ensureAttachmentId = (file: File): string => {
+  const fileAny = file as any;
+  if (typeof fileAny._attachmentId === 'string' && fileAny._attachmentId) {
+    return fileAny._attachmentId;
+  }
+  const id = `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  fileAny._attachmentId = id;
+  return id;
+};
+
+const collectConfirmedAttachmentsFromBlocks = (blocks: InputBlock[]): AttachmentItem[] => {
+  const items: AttachmentItem[] = [];
+  const seen = new Set<string>();
+
+  for (const block of blocks) {
+    if (block.type !== 'file' || !block.file) continue;
+    const file = block.file;
+    const id = ensureAttachmentId(file);
+    if (seen.has(id)) continue;
+    seen.add(id);
+
+    const fileAny = file as any;
+    const source: AttachmentSource = (fileAny._canvasElId || fileAny._canvasAutoInsert) ? 'canvas' : 'upload';
+    items.push({
+      id,
+      file,
+      source,
+      canvasElId: typeof fileAny._canvasElId === 'string' ? fileAny._canvasElId : undefined,
+    });
+  }
+
+  return items;
+};
+
+const appendFileBlockToInput = (state: any, file: File) => {
+  if (state.inputBlocks.length === 0) {
+    state.inputBlocks.push({ id: `text-${Date.now()}`, type: 'text', text: '' });
+  }
+
+  const fileBlock: InputBlock = { id: `file-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, type: 'file', file };
+  const lastIndex = state.inputBlocks.length - 1;
+  const lastBlock = state.inputBlocks[lastIndex];
+
+  if (lastBlock?.type === 'text') {
+    const lastText = lastBlock.text || '';
+
+    if (lastText.length > 0) {
+      const textBlock: InputBlock = { id: `text-${Date.now() + 1}`, type: 'text', text: '' };
+      state.inputBlocks.push(fileBlock, textBlock);
+      state.activeBlockId = textBlock.id;
+      state.selectionIndex = 0;
+      return;
+    }
+
+    state.inputBlocks.splice(lastIndex, 0, fileBlock);
+    state.activeBlockId = lastBlock.id;
+    state.selectionIndex = 0;
+  } else {
+    const textBlock: InputBlock = { id: `text-${Date.now() + 1}`, type: 'text', text: '' };
+    state.inputBlocks.push(fileBlock, textBlock);
+    state.activeBlockId = textBlock.id;
+    state.selectionIndex = 0;
+  }
+};
+
 // ─── Pure helper: normalize input blocks ───
 export function normalizeInputBlocks(blocks: InputBlock[]): InputBlock[] {
   if (blocks.length === 0) return [{ id: `text-${Date.now()}`, type: 'text', text: '' }];
@@ -36,6 +110,8 @@ interface AgentState {
   inputBlocks: InputBlock[];
   activeBlockId: string;
   selectionIndex: number | null;
+  pendingAttachment: AttachmentItem | null;
+  confirmedAttachments: AttachmentItem[];
 
   // 聊天状态
   isTyping: boolean;
@@ -92,6 +168,9 @@ interface AgentState {
     setActiveBlockId: (id: string) => void;
     setSelectionIndex: (index: number | null) => void;
     insertInputFile: (file: File) => void;
+    appendInputFile: (file: File) => void;
+    setPendingAttachment: (attachment: AttachmentItem | null) => void;
+    confirmPendingAttachment: () => void;
 
     setIsTyping: (typing: boolean) => void;
 
@@ -136,6 +215,8 @@ const initialState = {
   inputBlocks: [{ id: 'init', type: 'text' as const, text: '' }],
   activeBlockId: 'init',
   selectionIndex: null,
+  pendingAttachment: null,
+  confirmedAttachments: [] as AttachmentItem[],
 
   isTyping: false,
 
@@ -191,12 +272,16 @@ export const useAgentStore = create<AgentState>()(
 
         setMessages: (messages) => set({ messages }),
 
-        clearMessages: () => set({ messages: [], inputBlocks: [{ id: 'init', type: 'text', text: '' }] }),
+        clearMessages: () => set({ messages: [], inputBlocks: [{ id: 'init', type: 'text', text: '' }], pendingAttachment: null, confirmedAttachments: [] }),
 
-        setInputBlocks: (blocks) => set({ inputBlocks: normalizeInputBlocks(blocks) }),
+        setInputBlocks: (blocks) => {
+          const normalized = normalizeInputBlocks(blocks);
+          set({ inputBlocks: normalized, confirmedAttachments: collectConfirmedAttachmentsFromBlocks(normalized) });
+        },
 
         addInputBlock: (block) => set((state) => {
           state.inputBlocks.push(block);
+          state.confirmedAttachments = collectConfirmedAttachmentsFromBlocks(state.inputBlocks);
         }),
 
         removeInputBlock: (id) => set((state) => {
@@ -215,12 +300,15 @@ export const useAgentStore = create<AgentState>()(
               state.inputBlocks.push({ id: `text-${Date.now()}`, type: 'text', text: '' });
             }
           }
+
+          state.confirmedAttachments = collectConfirmedAttachmentsFromBlocks(state.inputBlocks);
         }),
 
         updateInputBlock: (id, updates) => set((state) => {
           const block = state.inputBlocks.find(b => b.id === id);
           if (block) {
             Object.assign(block, updates);
+            state.confirmedAttachments = collectConfirmedAttachmentsFromBlocks(state.inputBlocks);
           }
         }),
 
@@ -265,6 +353,28 @@ export const useAgentStore = create<AgentState>()(
             state.activeBlockId = textBlock.id;
             state.selectionIndex = 0;
           }
+
+          state.confirmedAttachments = collectConfirmedAttachmentsFromBlocks(state.inputBlocks);
+        }),
+
+        appendInputFile: (file) => set((state) => {
+          appendFileBlockToInput(state, file);
+          state.confirmedAttachments = collectConfirmedAttachmentsFromBlocks(state.inputBlocks);
+        }),
+
+        setPendingAttachment: (attachment) => set((state) => {
+          state.pendingAttachment = attachment;
+        }),
+
+        confirmPendingAttachment: () => set((state) => {
+          const pending = state.pendingAttachment;
+          if (!pending) return;
+
+          (pending.file as any)._canvasAutoInsert = false;
+          appendFileBlockToInput(state, pending.file);
+          state.confirmedAttachments = collectConfirmedAttachmentsFromBlocks(state.inputBlocks);
+
+          state.pendingAttachment = null;
         }),
 
         setIsTyping: (typing) => set({ isTyping: typing }),

@@ -6,7 +6,7 @@
 import { AgentRoutingDecision, ProjectContext, AgentType } from '../../types/agent.types';
 import { COCO_SYSTEM_PROMPT } from './prompts/coco.prompt';
 import { errorHandler, ErrorType } from '../../utils/error-handler';
-import { getApiKey, getClient } from '../gemini';
+import { getApiKey, getBestModelId, generateJsonResponse } from '../gemini';
 import { localPreRoute } from './local-router';
 import { z } from 'zod';
 
@@ -195,29 +195,13 @@ Analyze and route to appropriate agent. Return JSON with:
         // 使用错误处理包装器进行API调用
         const result = await errorHandler.withRetry(
             async () => {
-                const ai = getClient();
-                const abortController = new AbortController();
-                const timeoutId = setTimeout(() => abortController.abort(), finalConfig.timeout);
-
-                try {
-                    const response = await ai.models.generateContent({
-                        model: 'gemini-3-flash-preview',
-                        contents: { parts: [{ text: prompt }] },
-                        config: {
-                            temperature: 0.2,
-                            responseMimeType: 'application/json',
-                            abortSignal: abortController.signal
-                        }
-                    });
-                    return response;
-                } catch (error) {
-                    if (abortController.signal.aborted) {
-                        throw new Error('Request timeout');
-                    }
-                    throw error;
-                } finally {
-                    clearTimeout(timeoutId);
-                }
+                const routeModel = getBestModelId('text');
+                return generateJsonResponse({
+                    model: routeModel,
+                    parts: [{ text: prompt }],
+                    temperature: 0.2,
+                    operation: 'routeToAgent'
+                });
             },
             {
                 maxRetries: 2,

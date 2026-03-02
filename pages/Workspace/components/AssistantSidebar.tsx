@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
     MessageSquare, ChevronDown, CirclePlus, Clock, Search, X, Share2,
-    File as FileIcon, Image as ImageIcon, Video, Download, Store, Layout, Globe, FileText, PanelRightClose
+    File as FileIcon, Image as ImageIcon, Video, Download, Store, Layout, Globe, FileText, PanelRightClose, Compass
 } from 'lucide-react';
 import { useAgentStore } from '../../../stores/agent.store';
 import { MessageList } from './MessageList';
@@ -56,6 +56,7 @@ interface AssistantSidebarProps {
     showVideoSettingsDropdown: boolean;
     setShowVideoSettingsDropdown: (v: boolean) => void;
     markers: Marker[];
+    onSaveMarkerLabel?: (markerId: string, label: string) => void;
 }
 
 export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
@@ -78,7 +79,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     isDragOver, setIsDragOver,
     isVideoPanelHovered, setIsVideoPanelHovered,
     showVideoSettingsDropdown, setShowVideoSettingsDropdown,
-    markers,
+    markers, onSaveMarkerLabel,
 }) => {
     const messages = useAgentStore(s => s.messages);
     const { setMessages, clearMessages, setIsAgentMode } = useAgentStore(s => s.actions);
@@ -96,7 +97,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: 400, opacity: 0 }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="absolute top-0 right-0 w-[480px] h-full bg-[#f8f9fc] border-l border-gray-200 shadow-[-10px_0_30px_rgba(0,0,0,0.03)] z-50 flex flex-col overflow-visible"
+            className="absolute top-0 right-0 w-[480px] h-full min-h-0 bg-[#f8f9fc] border-l border-gray-200 shadow-[-10px_0_30px_rgba(0,0,0,0.03)] z-50 flex flex-col overflow-hidden"
         >
             {/* Header with Toolbar - Lovart Style */}
             <div className="px-3 py-2.5 flex items-center justify-between border-b border-gray-100 z-20 shrink-0 select-none">
@@ -270,7 +271,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                 </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-5 py-5 no-scrollbar relative">
+            <div className="flex-1 min-h-0 overflow-y-auto px-5 py-5 no-scrollbar relative">
                 {messages.length === 0 ? (
                     <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}>
                         <div className="flex items-center gap-2.5 mb-6">
@@ -319,6 +320,35 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                                 <Video size={15} strokeWidth={1.8} />
                                 <span>分镜故事板</span>
                             </button>
+                            <button
+                                onClick={() => handleSend(
+                                    '执行一键全流程',
+                                    undefined,
+                                    webEnabled,
+                                    {
+                                        id: 'xcai-oneclick',
+                                        name: 'SKYSPER视觉',
+                                        iconName: 'Compass',
+                                        config: {
+                                            mode: 'standard',
+                                            outputs: {
+                                                startup_pack: true,
+                                                p0_strategy: true,
+                                                p1_visual: true,
+                                                p2_copy: true,
+                                                p3_main_image: true,
+                                                p4_secondary_images: true,
+                                                p5_aplus: true,
+                                                final_image_generation: false,
+                                            },
+                                        },
+                                    }
+                                )}
+                                className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900 hover:shadow-sm transition-all cursor-pointer"
+                            >
+                                <Compass size={15} strokeWidth={1.8} />
+                                <span>SKYSPER视觉</span>
+                            </button>
                         </div>
                     </motion.div>
                 ) : (
@@ -330,44 +360,47 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                 )}
             </div>
 
-            <InputArea
-                creationMode={creationMode}
-                setCreationMode={setCreationMode}
-                handleSend={handleSend}
-                handleModeSwitch={handleModeSwitch}
-                fileInputRef={fileInputRef}
-                selectedChipId={selectedChipId}
-                setSelectedChipId={setSelectedChipId}
-                hoveredChipId={hoveredChipId}
-                setHoveredChipId={setHoveredChipId}
-                showModeSelector={showModeSelector}
-                setShowModeSelector={setShowModeSelector}
-                showModelPreference={showModelPreference}
-                setShowModelPreference={setShowModelPreference}
-                modelPreferenceTab={modelPreferenceTab}
-                setModelPreferenceTab={setModelPreferenceTab}
-                autoModelSelect={autoModelSelect}
-                setAutoModelSelect={setAutoModelSelect}
-                preferredImageModel={preferredImageModel}
-                setPreferredImageModel={setPreferredImageModel}
-                preferredVideoModel={preferredVideoModel}
-                setPreferredVideoModel={setPreferredVideoModel}
-                preferred3DModel={preferred3DModel}
-                setPreferred3DModel={setPreferred3DModel}
-                showRatioPicker={showRatioPicker}
-                setShowRatioPicker={setShowRatioPicker}
-                showModelPicker={showModelPicker}
-                setShowModelPicker={setShowModelPicker}
-                isInputFocused={isInputFocused}
-                setIsInputFocused={setIsInputFocused}
-                isDragOver={isDragOver}
-                setIsDragOver={setIsDragOver}
-                isVideoPanelHovered={isVideoPanelHovered}
-                setIsVideoPanelHovered={setIsVideoPanelHovered}
-                showVideoSettingsDropdown={showVideoSettingsDropdown}
-                setShowVideoSettingsDropdown={setShowVideoSettingsDropdown}
-                markers={markers}
-            />
+            <div className="shrink-0 flex-shrink-0 border-t border-gray-100 bg-[#f8f9fc]">
+                <InputArea
+                    creationMode={creationMode}
+                    setCreationMode={setCreationMode}
+                    handleSend={handleSend}
+                    handleModeSwitch={handleModeSwitch}
+                    fileInputRef={fileInputRef}
+                    selectedChipId={selectedChipId}
+                    setSelectedChipId={setSelectedChipId}
+                    hoveredChipId={hoveredChipId}
+                    setHoveredChipId={setHoveredChipId}
+                    showModeSelector={showModeSelector}
+                    setShowModeSelector={setShowModeSelector}
+                    showModelPreference={showModelPreference}
+                    setShowModelPreference={setShowModelPreference}
+                    modelPreferenceTab={modelPreferenceTab}
+                    setModelPreferenceTab={setModelPreferenceTab}
+                    autoModelSelect={autoModelSelect}
+                    setAutoModelSelect={setAutoModelSelect}
+                    preferredImageModel={preferredImageModel}
+                    setPreferredImageModel={setPreferredImageModel}
+                    preferredVideoModel={preferredVideoModel}
+                    setPreferredVideoModel={setPreferredVideoModel}
+                    preferred3DModel={preferred3DModel}
+                    setPreferred3DModel={setPreferred3DModel}
+                    showRatioPicker={showRatioPicker}
+                    setShowRatioPicker={setShowRatioPicker}
+                    showModelPicker={showModelPicker}
+                    setShowModelPicker={setShowModelPicker}
+                    isInputFocused={isInputFocused}
+                    setIsInputFocused={setIsInputFocused}
+                    isDragOver={isDragOver}
+                    setIsDragOver={setIsDragOver}
+                    isVideoPanelHovered={isVideoPanelHovered}
+                    setIsVideoPanelHovered={setIsVideoPanelHovered}
+                    showVideoSettingsDropdown={showVideoSettingsDropdown}
+                    setShowVideoSettingsDropdown={setShowVideoSettingsDropdown}
+                    markers={markers}
+                    onSaveMarkerLabel={onSaveMarkerLabel}
+                />
+            </div>
         </motion.div>
     );
 };

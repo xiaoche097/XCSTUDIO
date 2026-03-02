@@ -1,4 +1,4 @@
-import { getClient } from '../gemini';
+import { generateImage, refineImagePrompt } from '../gemini';
 
 export interface SmartEditParams {
   sourceUrl: string;
@@ -15,29 +15,39 @@ export async function smartEditSkill(params: SmartEditParams): Promise<string | 
     'extend': `Extend this image ${params.parameters?.direction || 'outward'} naturally`
   };
 
-  const prompt = editPrompts[params.editType] || 'Edit this image';
+  const promptTemplate = params.parameters?.prompt || editPrompts[params.editType] || 'Edit this image';
 
   try {
-    const matches = params.sourceUrl.match(/^data:(.+);base64,(.+)$/);
-    if (!matches) return null;
+    let finalPrompt = promptTemplate;
 
-    const response = await getClient().models.generateContent({
-      model: 'gemini-3-pro-image-preview',
-      contents: {
-        parts: [
-          { inlineData: { mimeType: matches[1], data: matches[2] } },
-          { text: prompt }
-        ]
-      },
-      config: { imageConfig: { aspectRatio: '1:1' } }
-    });
+    // Determine the model to use - upscale usually works best with the Pro image model
+    const generationModel = params.parameters?.model || 'Nano Banana Pro';
 
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) {
-        return `data:image/png;base64,${part.inlineData.data}`;
+    // 2-Step Generation: If the prompt looks like a framework (meta-prompt), refine it first via Flash
+    const isMetaPrompt = promptTemplate.includes('【') || promptTemplate.includes('══');
+    if (isMetaPrompt) {
+      console.log(`[smartEditSkill] Detected meta-prompt framework, refining with Flash...`);
+      try {
+        const refined = await refineImagePrompt(params.sourceUrl, promptTemplate);
+        if (refined) {
+          finalPrompt = refined;
+          console.log(`[smartEditSkill] Prompt refined successfully.`);
+        }
+      } catch (refineErr) {
+        console.warn(`[smartEditSkill] Prompt refinement failed, using raw template:`, refineErr);
       }
     }
-    return null;
+
+    // Use the robust generateImage helper instead of raw SDK call
+    const result = await generateImage({
+      prompt: finalPrompt,
+      model: generationModel,
+      aspectRatio: '1:1', // Default for smart edit results, unless specified
+      imageSize: params.editType === 'upscale' ? (params.parameters?.factor >= 4 ? '4K' : '2K') : '1K',
+      referenceImage: params.sourceUrl
+    });
+
+    return result;
   } catch (error) {
     console.error('Smart edit error:', error);
     return null;

@@ -1,4 +1,5 @@
 import { VideoProvider, VideoGenerationRequest } from './types';
+import { fetchWithResilience } from '../http/api-client';
 
 const getKlingKey = (): string => {
   return localStorage.getItem('kling_api_key') || '';
@@ -41,14 +42,14 @@ export const klingVideoProvider: VideoProvider = {
       body.image = request.startFrame;
     }
 
-    const res = await fetch(endpoint, {
+    const res = await fetchWithResilience(endpoint, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
-    });
+    }, { operation: 'kling.submitVideo', retries: 1 });
 
     if (!res.ok) {
       const err = await res.json();
@@ -66,9 +67,9 @@ export const klingVideoProvider: VideoProvider = {
     const maxAttempts = 120;
     for (let i = 0; i < maxAttempts; i++) {
       await new Promise(r => setTimeout(r, 3000));
-      const pollRes = await fetch(pollEndpoint, {
+      const pollRes = await fetchWithResilience(pollEndpoint, {
         headers: { 'Authorization': `Bearer ${apiKey}` },
-      });
+      }, { operation: 'kling.pollVideo', retries: 1 });
       const pollData = await pollRes.json();
       if (pollData.data?.task_status === 'succeed') {
         const videoUrl = pollData.data?.task_result?.videos?.[0]?.url;
