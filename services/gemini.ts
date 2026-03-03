@@ -230,7 +230,7 @@ export const generateJsonResponse = async (
 
     const provider = getProviderConfig();
     const baseUrl = normalizeUrl(provider.baseUrl || '');
-    const isGoogleDirect = !baseUrl || baseUrl.includes('googleapis.com');
+    const isGoogleDirect = !baseUrl || baseUrl.includes('googleapis.com') || provider.id === 'yunwu' || baseUrl.includes('yunwu.ai');
 
     if (isGoogleDirect) {
         const response = await getClient().models.generateContent({
@@ -778,7 +778,7 @@ export const createChatSession = (model: string = FLASH_MODEL, history: Content[
 
     const provider = getProviderConfig();
     const baseUrl = normalizeUrl(provider.baseUrl || '');
-    const isGoogleDirect = !baseUrl || baseUrl.includes('googleapis.com');
+    const isGoogleDirect = !baseUrl || baseUrl.includes('googleapis.com') || provider.id === 'yunwu' || baseUrl.includes('yunwu.ai');
 
     if (isGoogleDirect) {
         return getClient().chats.create({
