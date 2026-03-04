@@ -451,12 +451,18 @@ export const InputArea: React.FC<InputAreaProps> = ({
                     }}
                     onClick={(e) => {
                         if (isAllInputSelected) setIsAllInputSelected(false);
-                        if (e.target === e.currentTarget || (e.target as HTMLElement).closest('.input-flow-container') === e.currentTarget.querySelector('.input-flow-container')) {
-                            const lastText = inputBlocks.filter(b => b.type === 'text').pop();
-                            const targetId = lastText?.id || inputBlocks[inputBlocks.length - 1].id;
-                            const el = document.getElementById(`input-block-${targetId}`);
-                            el?.focus();
-                        }
+                        const target = e.target as HTMLElement;
+                        if (target.closest('[id^="input-block-"]')) return;
+                        if (target.closest('[id^="file-chip-"]') || target.closest('[id^="marker-chip-"]')) return;
+
+                        const clickedContainer = target === e.currentTarget;
+                        const clickedFlowBackground = target.classList.contains('input-flow-container');
+                        if (!clickedContainer && !clickedFlowBackground) return;
+
+                        const lastText = inputBlocks.filter(b => b.type === 'text').pop();
+                        const targetId = lastText?.id || inputBlocks[inputBlocks.length - 1].id;
+                        const el = document.getElementById(`input-block-${targetId}`);
+                        el?.focus();
                     }}>
                     <div
                         className="input-flow-container flex flex-wrap items-start content-start gap-[2px] pt-2 min-h-[80px] max-h-[200px] overflow-y-auto pr-1"
@@ -581,6 +587,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                     const imageWidth = Number(fileAny._canvasWidth || fileAny._canvasW || 0);
                                     const imageHeight = Number(fileAny._canvasHeight || fileAny._canvasH || 0);
                                     const hasValidAspect = imageWidth > 0 && imageHeight > 0;
+                                    const chipPreviewUrl = fileAny._chipPreviewUrl || (fileAny._chipPreviewUrl = URL.createObjectURL(file));
                                     return (
                                         <div
                                             key={block.id}
@@ -601,10 +608,42 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                             onMouseLeave={() => setHoveredChipId(null)}
                                         >
                                             <div className="w-5 h-5 rounded-full overflow-hidden flex-shrink-0 border border-gray-100 shadow-sm">
-                                                {file.type.startsWith('image/') ? <img src={URL.createObjectURL(file)} className="w-full h-full object-cover" /> : <FileText size={10} className="text-gray-500" />}
+                                                {file.type.startsWith('image/') ? <img src={chipPreviewUrl} className="w-full h-full object-cover" /> : <FileText size={10} className="text-gray-500" />}
                                             </div>
                                             <span className="text-[11px] text-gray-700 font-bold max-w-[100px] truncate ml-0.5">{chipLabel}</span>
                                             <button onClick={(e) => { e.stopPropagation(); removeInputBlock(block.id); setSelectedChipId(null); }} className="w-3.5 h-3.5 rounded-full flex items-center justify-center text-gray-400 hover:text-red-500 hover:bg-red-50 transition opacity-0 group-hover:opacity-100 ml-0.5"><X size={10} /></button>
+
+                                            {isHovered && file.type.startsWith('image/') && (() => {
+                                                const chipRect = document.getElementById(`file-chip-${block.id}`)?.getBoundingClientRect();
+                                                if (!chipRect) return null;
+
+                                                const maxSize = 220;
+                                                const ratio = hasValidAspect ? imageWidth / imageHeight : 1;
+                                                const renderWidth = ratio > 1 ? maxSize : Math.max(120, maxSize * ratio);
+                                                const renderHeight = ratio > 1 ? Math.max(120, maxSize / ratio) : maxSize;
+
+                                                return ReactDOM.createPortal(
+                                                    <div
+                                                        className="fixed z-[9999] pointer-events-none"
+                                                        style={{
+                                                            left: chipRect.left + chipRect.width / 2 - renderWidth / 2,
+                                                            top: chipRect.top - renderHeight - 12,
+                                                            width: renderWidth,
+                                                            height: renderHeight,
+                                                        }}
+                                                    >
+                                                        <motion.div
+                                                            initial={{ opacity: 0, scale: 0.94, y: 8 }}
+                                                            animate={{ opacity: 1, scale: 1, y: 0 }}
+                                                            transition={{ duration: 0.18 }}
+                                                            className="w-full h-full bg-white rounded-2xl shadow-xl overflow-hidden border border-gray-200"
+                                                        >
+                                                            <img src={chipPreviewUrl} className="w-full h-full object-cover" />
+                                                        </motion.div>
+                                                    </div>,
+                                                    document.body
+                                                );
+                                            })()}
                                         </div>
                                     );
                                 }

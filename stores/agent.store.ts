@@ -76,6 +76,8 @@ const appendFileBlockToInput = (state: any, file: File) => {
     state.activeBlockId = textBlock.id;
     state.selectionIndex = 0;
   }
+
+  state.inputBlocks = normalizeInputBlocks(state.inputBlocks);
 };
 
 // ─── Pure helper: normalize input blocks ───
@@ -83,10 +85,16 @@ export function normalizeInputBlocks(blocks: InputBlock[]): InputBlock[] {
   if (blocks.length === 0) return [{ id: `text-${Date.now()}`, type: 'text', text: '' }];
   const result: InputBlock[] = [];
   for (const block of blocks) {
+    const last = result[result.length - 1];
+
+    if (block.type === 'file' && last?.type === 'file') {
+      result.push({ id: `text-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, type: 'text', text: '' });
+    }
+
     if (block.type === 'text') {
-      const last = result[result.length - 1];
-      if (last && last.type === 'text') {
-        last.text = (last.text || '') + (block.text || '');
+      const currentLast = result[result.length - 1];
+      if (currentLast && currentLast.type === 'text') {
+        currentLast.text = (currentLast.text || '') + (block.text || '');
         continue;
       }
     }
