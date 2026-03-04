@@ -1,8 +1,12 @@
 
-
 // ... existing imports
 import { AppNode, NodeStatus, NodeType } from '../types';
-import { RefreshCw, Play, Image as ImageIcon, Video as VideoIcon, Type, AlertCircle, CheckCircle, Plus, Maximize2, Download, MoreHorizontal, Wand2, Scaling, FileSearch, Edit, Loader2, Layers, Trash2, X, Upload, Scissors, Film, MousePointerClick, Crop as CropIcon, ChevronDown, ChevronUp, GripHorizontal, Link, Copy, Monitor, Music, Pause, Volume2, Mic2 } from 'lucide-react';
+import {
+    X, Type, ImageIcon, FileSearch, Trash2,
+    Play, Pause, Download, Maximize2, Plus, GripHorizontal,
+    RefreshCw, Layers, Monitor, Video as VideoIcon, Sparkles, Wand2, Mic2, Brush, Scissors,
+    ImagePlus, Edit, Loader2, Upload, Copy, AlertCircle, ChevronDown, Scaling
+} from 'lucide-react';
 import { VideoModeSelector, SceneDirectorOverlay } from './VideoNodeModules';
 import React, { memo, useRef, useState, useEffect, useCallback } from 'react';
 
@@ -428,6 +432,8 @@ const NodeComponent: React.FC<NodeProps> = ({
             case NodeType.PROMPT_INPUT: return { icon: Type, color: 'text-amber-400', border: 'border-amber-500/30' };
             case NodeType.IMAGE_GENERATOR: return { icon: ImageIcon, color: 'text-cyan-400', border: 'border-cyan-500/30' };
             case NodeType.VIDEO_GENERATOR: return { icon: VideoIcon, color: 'text-purple-400', border: 'border-purple-500/30' };
+            case NodeType.IMAGE_TO_IMAGE: return { icon: Sparkles, color: 'text-blue-400', border: 'border-blue-500/30' };
+            case NodeType.IMAGE_TO_VIDEO: return { icon: VideoIcon, color: 'text-indigo-400', border: 'border-indigo-500/30' };
             case NodeType.AUDIO_GENERATOR: return { icon: Mic2, color: 'text-pink-400', border: 'border-pink-500/30' };
             case NodeType.VIDEO_ANALYZER: return { icon: FileSearch, color: 'text-emerald-400', border: 'border-emerald-500/30' };
             case NodeType.IMAGE_EDITOR: return { icon: Edit, color: 'text-rose-400', border: 'border-rose-500/30' };
@@ -442,7 +448,7 @@ const NodeComponent: React.FC<NodeProps> = ({
         if (node.type === NodeType.AUDIO_GENERATOR) return AUDIO_NODE_HEIGHT;
         const ratio = node.data.aspectRatio || '16:9';
         const [w, h] = ratio.split(':').map(Number);
-        const extra = (node.type === NodeType.VIDEO_GENERATOR && generationMode === 'CUT') ? 36 : 0;
+        const extra = ((node.type === NodeType.VIDEO_GENERATOR || node.type === NodeType.IMAGE_TO_VIDEO) && generationMode === 'CUT') ? 36 : 0;
         return ((node.width || DEFAULT_NODE_WIDTH) * h / w) + extra;
     };
     const nodeHeight = getNodeHeight();
@@ -454,7 +460,7 @@ const NodeComponent: React.FC<NodeProps> = ({
         return (
             <div className={`absolute -top-10 left-0 w-full flex items-center justify-between px-1 transition-all duration-300 ${showTopBar ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-2 pointer-events-none'}`}>
                 <div className="flex items-center gap-1.5 pointer-events-auto">
-                    {node.type === NodeType.VIDEO_GENERATOR && (<VideoModeSelector currentMode={generationMode} onSelect={(mode) => onUpdate(node.id, { generationMode: mode })} />)}
+                    {(node.type === NodeType.VIDEO_GENERATOR || node.type === NodeType.IMAGE_TO_VIDEO) && (<VideoModeSelector currentMode={generationMode} onSelect={(mode) => onUpdate(node.id, { generationMode: mode })} />)}
                     {(node.data.image || node.data.videoUri || node.data.audioUri) && (
                         <div className="flex items-center gap-1">
                             <button onClick={handleDownload} className="p-1.5 bg-black/40 border border-white/10 backdrop-blur-md rounded-md text-slate-400 hover:text-white hover:border-white/30 transition-colors" title="下载"><Download size={14} /></button>
@@ -521,10 +527,12 @@ const NodeComponent: React.FC<NodeProps> = ({
         }
 
         const hasContent = node.data.image || node.data.videoUri;
+        const acceptType = node.type === NodeType.VIDEO_GENERATOR ? "video/*" : "image/*";
+        const handleUpload = node.type === NodeType.VIDEO_GENERATOR ? handleUploadVideo : handleUploadImage;
         return (
             <div className="w-full h-full relative group/media overflow-hidden bg-zinc-900" onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>
                 {!hasContent ? (
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-600"><div className="w-20 h-20 rounded-[28px] bg-white/5 border border-white/5 flex items-center justify-center cursor-pointer hover:bg-white/10 hover:scale-105 transition-all duration-300 shadow-inner" onClick={() => fileInputRef.current?.click()}>{isWorking ? <Loader2 className="animate-spin text-cyan-500" size={32} /> : <NodeIcon size={32} className="opacity-50" />}</div><span className="text-[11px] font-bold uppercase tracking-[0.2em] opacity-40">{isWorking ? "处理中..." : "拖拽或上传"}</span><input type="file" ref={fileInputRef} className="hidden" accept={node.type.includes('VIDEO') ? "video/*" : "image/*"} onChange={node.type.includes('VIDEO') ? handleUploadVideo : handleUploadImage} /></div>
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-slate-600"><div className="w-20 h-20 rounded-[28px] bg-white/5 border border-white/5 flex items-center justify-center cursor-pointer hover:bg-white/10 hover:scale-105 transition-all duration-300 shadow-inner" onClick={() => fileInputRef.current?.click()}>{isWorking ? <Loader2 className="animate-spin text-cyan-500" size={32} /> : <NodeIcon size={32} className="opacity-50" />}</div><span className="text-[11px] font-bold uppercase tracking-[0.2em] opacity-40">{isWorking ? "处理中..." : "拖拽或上传"}</span><input type="file" ref={fileInputRef} className="hidden" accept={acceptType} onChange={handleUpload} /></div>
                 ) : (
                     <>
                         {node.data.image ?
@@ -590,7 +598,7 @@ const NodeComponent: React.FC<NodeProps> = ({
     const renderBottomPanel = () => {
         const isOpen = (isHovered || isInputFocused);
         let models: { l: string, v: string }[] = [];
-        if (node.type === NodeType.VIDEO_GENERATOR) {
+        if (node.type === NodeType.VIDEO_GENERATOR || node.type === NodeType.IMAGE_TO_VIDEO) {
             models = [
                 { l: 'Veo 3.1 极速版 (Fast)', v: 'veo-3.1-fast-generate-preview' },
                 { l: 'Veo 3.1 专业版 (Pro)', v: 'veo-3.1-generate-preview' },
@@ -641,14 +649,14 @@ const NodeComponent: React.FC<NodeProps> = ({
                             )}
 
                             {/* Dynamic Resolution / Quality Dropdown */}
-                            {(node.type.includes('IMAGE') || node.type === NodeType.VIDEO_GENERATOR) && (
+                            {(node.type.includes('IMAGE') || node.type.includes('VIDEO_GENERATOR') || node.type === NodeType.IMAGE_TO_VIDEO) && (
                                 <div className="relative group/resolution">
                                     <div className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-white/5 cursor-pointer transition-colors text-[10px] font-bold text-slate-400 hover:text-cyan-400">
                                         <Monitor size={12} />
                                         <span>
                                             {node.data.model === 'kling-3.0'
                                                 ? (MODEL_CONFIGS['kling-3.0'].qualities.find(q => q.v === (node.data.videoQuality || 'std'))?.l)
-                                                : (node.data.resolution || (node.type.includes('IMAGE') ? '1k' : '720p'))
+                                                : (node.data.resolution || (node.type.includes('IMAGE') && !node.type.includes('VIDEO') ? '1k' : '720p'))
                                             }
                                         </span>
                                     </div>
@@ -659,7 +667,7 @@ const NodeComponent: React.FC<NodeProps> = ({
                                                     <div key={q.v} onClick={() => onUpdate(node.id, { videoQuality: q.v })} className={`px-3 py-2 text-[10px] font-bold cursor-pointer hover:bg-white/10 ${(node.data.videoQuality || 'std') === q.v ? 'text-cyan-400 bg-white/5' : 'text-slate-400'}`}>{q.l}</div>
                                                 ))
                                             ) : (
-                                                (MODEL_CONFIGS[node.data.model!]?.resolutions || (node.type.includes('IMAGE') ? IMAGE_RESOLUTIONS : VIDEO_RESOLUTIONS)).map(r => (
+                                                (MODEL_CONFIGS[node.data.model!]?.resolutions || (node.type.includes('IMAGE') && !node.type.includes('VIDEO') ? IMAGE_RESOLUTIONS : VIDEO_RESOLUTIONS)).map(r => (
                                                     <div key={r} onClick={() => onUpdate(node.id, { resolution: r })} className={`px-3 py-2 text-[10px] font-bold cursor-pointer hover:bg-white/10 ${node.data.resolution === r ? 'text-cyan-400 bg-white/5' : 'text-slate-400'}`}>{r}</div>
                                                 ))
                                             )}
@@ -669,7 +677,7 @@ const NodeComponent: React.FC<NodeProps> = ({
                             )}
 
                             {/* Dynamic Duration Dropdown (Video Only) */}
-                            {node.type === NodeType.VIDEO_GENERATOR && MODEL_CONFIGS[node.data.model!]?.durations && (
+                            {(node.type === NodeType.VIDEO_GENERATOR || node.type === NodeType.IMAGE_TO_VIDEO) && MODEL_CONFIGS[node.data.model!]?.durations && (
                                 <div className="relative group/duration">
                                     <div className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-white/5 cursor-pointer transition-colors text-[10px] font-bold text-slate-400 hover:text-cyan-400">
                                         <VideoIcon size={12} />
@@ -685,10 +693,10 @@ const NodeComponent: React.FC<NodeProps> = ({
                                 </div>
                             )}
 
-                            {(node.type.includes('IMAGE') || node.type === NodeType.VIDEO_GENERATOR) && (
+                            {(node.type.includes('IMAGE') || node.type === NodeType.VIDEO_GENERATOR || node.type === NodeType.IMAGE_TO_VIDEO) && (
                                 <div className="relative group/count">
-                                    <div className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-white/5 cursor-pointer transition-colors text-[10px] font-bold text-slate-400 hover:text-cyan-400"><Layers size={12} /><span>{node.type.includes('IMAGE') ? (node.data.imageCount || 1) : (node.data.videoCount || 1)}</span></div>
-                                    <div className="absolute bottom-full left-0 pb-2 w-16 opacity-0 translate-y-2 pointer-events-none group-hover/count:opacity-100 group-hover/count:translate-y-0 group-hover/count:pointer-events-auto transition-all duration-200 z-[200]"><div className="bg-[#1c1c1e] border border-white/10 rounded-xl shadow-xl overflow-hidden">{(node.type.includes('IMAGE') ? IMAGE_COUNTS : VIDEO_COUNTS).map(c => (<div key={c} onClick={() => onUpdate(node.id, node.type.includes('IMAGE') ? { imageCount: c } : { videoCount: c })} className={`px-3 py-2 text-[10px] font-bold cursor-pointer hover:bg-white/10 ${((node.type.includes('IMAGE') ? node.data.imageCount : node.data.videoCount) || 1) === c ? 'text-cyan-400 bg-white/5' : 'text-slate-400'}`}>{c}</div>))}</div></div>
+                                    <div className="flex items-center gap-1 px-2 py-1 rounded-lg hover:bg-white/5 cursor-pointer transition-colors text-[10px] font-bold text-slate-400 hover:text-cyan-400"><Layers size={12} /><span>{(node.type.includes('IMAGE') && !node.type.includes('VIDEO')) ? (node.data.imageCount || 1) : (node.data.videoCount || 1)}</span></div>
+                                    <div className="absolute bottom-full left-0 pb-2 w-16 opacity-0 translate-y-2 pointer-events-none group-hover/count:opacity-100 group-hover/count:translate-y-0 group-hover/count:pointer-events-auto transition-all duration-200 z-[200]"><div className="bg-[#1c1c1e] border border-white/10 rounded-xl shadow-xl overflow-hidden">{((node.type.includes('IMAGE') && !node.type.includes('VIDEO')) ? IMAGE_COUNTS : VIDEO_COUNTS).map(c => (<div key={c} onClick={() => onUpdate(node.id, (node.type.includes('IMAGE') && !node.type.includes('VIDEO')) ? { imageCount: c } : { videoCount: c })} className={`px-3 py-2 text-[10px] font-bold cursor-pointer hover:bg-white/10 ${(((node.type.includes('IMAGE') && !node.type.includes('VIDEO')) ? node.data.imageCount : node.data.videoCount) || 1) === c ? 'text-cyan-400 bg-white/5' : 'text-slate-400'}`}>{c}</div>))}</div></div>
                                 </div>
                             )}
                         </div>

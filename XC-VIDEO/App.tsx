@@ -350,6 +350,8 @@ export const App = () => {
             case NodeType.PROMPT_INPUT: return '创意描述';
             case NodeType.IMAGE_GENERATOR: return '文字生图';
             case NodeType.VIDEO_GENERATOR: return '文生视频';
+            case NodeType.IMAGE_TO_IMAGE: return '图生图（创意）';
+            case NodeType.IMAGE_TO_VIDEO: return '图生视频';
             case NodeType.AUDIO_GENERATOR: return '灵感音乐';
             case NodeType.VIDEO_ANALYZER: return '视频分析';
             case NodeType.IMAGE_EDITOR: return '图像编辑';
@@ -361,6 +363,8 @@ export const App = () => {
             case NodeType.PROMPT_INPUT: return Type;
             case NodeType.IMAGE_GENERATOR: return ImageIcon;
             case NodeType.VIDEO_GENERATOR: return Film;
+            case NodeType.IMAGE_TO_IMAGE: return Sparkles;
+            case NodeType.IMAGE_TO_VIDEO: return Film;
             case NodeType.AUDIO_GENERATOR: return Mic2;
             case NodeType.VIDEO_ANALYZER: return ScanFace;
             case NodeType.IMAGE_EDITOR: return Brush;
@@ -450,6 +454,8 @@ export const App = () => {
             [NodeType.PROMPT_INPUT]: '创意描述',
             [NodeType.IMAGE_GENERATOR]: '文字生图',
             [NodeType.VIDEO_GENERATOR]: '文生视频',
+            [NodeType.IMAGE_TO_IMAGE]: '图生图（创意）',
+            [NodeType.IMAGE_TO_VIDEO]: '图生视频',
             [NodeType.AUDIO_GENERATOR]: '灵感音乐',
             [NodeType.VIDEO_ANALYZER]: '视频分析',
             [NodeType.IMAGE_EDITOR]: '图像编辑'
@@ -757,13 +763,18 @@ export const App = () => {
                 prompt = prompt ? `${combinedUpstream}\n${prompt}` : combinedUpstream;
             }
 
-            if (node.type === NodeType.IMAGE_GENERATOR) {
+            if (node.type === NodeType.IMAGE_GENERATOR || node.type === NodeType.IMAGE_TO_IMAGE) {
                 const inputImages: string[] = [];
                 inputs.forEach(n => { if (n?.data.image) inputImages.push(n.data.image); });
 
+                let enhancedPrompt = prompt;
+                if (node.type === NodeType.IMAGE_TO_IMAGE && inputImages.length > 0) {
+                    enhancedPrompt = prompt ? `${prompt} - 参考提供的图像风格和特征` : '请基于提供的图像直接生成风格相似或衍生的图像';
+                }
+
                 const isStoryboard = /分镜|storyboard|sequence|shots|frames|json/i.test(prompt);
 
-                if (isStoryboard) {
+                if (isStoryboard && node.type === NodeType.IMAGE_GENERATOR) {
                     try {
                         const storyboard = await planStoryboard(prompt, upstreamTexts.join('\n'));
                         if (storyboard.length > 1) {
@@ -818,12 +829,20 @@ export const App = () => {
                         console.warn("Storyboard planning failed", e);
                     }
                 }
-                const res = await generateImageFromText(prompt, node.data.model, inputImages, { aspectRatio: node.data.aspectRatio || '16:9', resolution: node.data.resolution, count: node.data.imageCount });
+                const res = await generateImageFromText(enhancedPrompt, node.data.model, inputImages, { aspectRatio: node.data.aspectRatio || '16:9', resolution: node.data.resolution, count: node.data.imageCount });
                 handleNodeUpdate(id, { image: res[0], images: res });
 
-            } else if (node.type === NodeType.VIDEO_GENERATOR) {
+            } else if (node.type === NodeType.VIDEO_GENERATOR || node.type === NodeType.IMAGE_TO_VIDEO) {
 
                 const strategy = await getGenerationStrategy(node, inputs, prompt);
+                let imageInput = strategy.inputImageForGeneration;
+                if (node.type === NodeType.IMAGE_TO_VIDEO) {
+                    const inputImages: string[] = [];
+                    inputs.forEach(n => { if (n?.data.image) inputImages.push(n.data.image); });
+                    if (inputImages.length > 0 && !imageInput) {
+                        imageInput = inputImages[0];
+                    }
+                }
 
                 const res = await generateVideo(
                     strategy.finalPrompt,
@@ -836,7 +855,7 @@ export const App = () => {
                         duration: node.data.duration,
                         videoQuality: node.data.videoQuality
                     },
-                    strategy.inputImageForGeneration,
+                    imageInput,
                     strategy.videoInput,
                     strategy.referenceImages
                 );
@@ -1009,16 +1028,16 @@ export const App = () => {
             <div
                 className={`w-full h-full overflow-hidden text-slate-200 selection:bg-cyan-500/30 ${isDraggingCanvas ? 'cursor-grabbing' : 'cursor-default'}`}
                 onMouseDown={handleCanvasMouseDown} onWheel={handleWheel}
-                onDoubleClick={(e) => { 
-                    e.preventDefault(); 
+                onDoubleClick={(e) => {
+                    e.preventDefault();
                     const target = e.target as HTMLElement;
                     // 如果点中节点、按钮或输入框，则不触发背景双击
                     if (target.closest('.node-ui') || target.closest('button') || target.closest('input')) return;
-                    
-                    if (e.detail > 1 && !selectionRect) { 
-                        setContextMenu({ visible: true, x: e.clientX, y: e.clientY, id: '' }); 
-                        setContextMenuTarget({ type: 'create' }); 
-                    } 
+
+                    if (e.detail > 1 && !selectionRect) {
+                        setContextMenu({ visible: true, x: e.clientX, y: e.clientY, id: '' });
+                        setContextMenuTarget({ type: 'create' });
+                    }
                 }}
                 onContextMenu={(e) => { e.preventDefault(); if (e.target === e.currentTarget) setContextMenu(null); }}
                 onDragOver={handleCanvasDragOver} onDrop={handleCanvasDrop}
@@ -1172,14 +1191,14 @@ export const App = () => {
                                 <button className="w-full text-left px-3 py-2 text-xs font-medium text-slate-300 hover:bg-cyan-500/20 hover:text-cyan-400 rounded-lg flex items-center gap-2 transition-colors" onClick={() => { const targetNode = nodes.find(n => n.id === contextMenu.id); if (targetNode) setClipboard(JSON.parse(JSON.stringify(targetNode))); setContextMenu(null); }}>
                                     <Copy size={12} /> 复制节点
                                 </button>
-                                {(() => { const targetNode = nodes.find(n => n.id === contextMenu.id); if (targetNode) { const isVideo = targetNode.type === NodeType.VIDEO_GENERATOR || targetNode.type === NodeType.VIDEO_ANALYZER; const isImage = targetNode.type === NodeType.IMAGE_GENERATOR || targetNode.type === NodeType.IMAGE_EDITOR; if (isVideo || isImage) { return (<button className="w-full text-left px-3 py-2 text-xs font-medium text-slate-300 hover:bg-purple-500/20 hover:text-purple-400 rounded-lg flex items-center gap-2 transition-colors" onClick={() => { replacementTargetRef.current = contextMenu.id; if (isVideo) replaceVideoInputRef.current?.click(); else replaceImageInputRef.current?.click(); setContextMenu(null); }}> <RefreshCw size={12} /> 替换素材 </button>); } } return null; })()}
+                                {(() => { const targetNode = nodes.find(n => n.id === contextMenu.id); if (targetNode) { const isVideo = targetNode.type === NodeType.VIDEO_GENERATOR || targetNode.type === NodeType.VIDEO_ANALYZER || targetNode.type === NodeType.IMAGE_TO_VIDEO; const isImage = targetNode.type === NodeType.IMAGE_GENERATOR || targetNode.type === NodeType.IMAGE_EDITOR || targetNode.type === NodeType.IMAGE_TO_IMAGE; if (isVideo || isImage) { return (<button className="w-full text-left px-3 py-2 text-xs font-medium text-slate-300 hover:bg-purple-500/20 hover:text-purple-400 rounded-lg flex items-center gap-2 transition-colors" onClick={() => { replacementTargetRef.current = contextMenu.id; if (isVideo) replaceVideoInputRef.current?.click(); else replaceImageInputRef.current?.click(); setContextMenu(null); }}> <RefreshCw size={12} /> 替换素材 </button>); } } return null; })()}
                                 <button className="w-full text-left px-3 py-2 text-xs font-medium text-red-400 hover:bg-red-500/20 rounded-lg flex items-center gap-2 transition-colors mt-1" onClick={() => { deleteNodes([contextMenuTarget.id]); setContextMenu(null); }}><Trash2 size={12} /> 删除节点</button>
                             </>
                         )}
                         {contextMenuTarget?.type === 'create' && (
                             <>
                                 <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-500">创建新节点</div>
-                                {[NodeType.PROMPT_INPUT, NodeType.IMAGE_GENERATOR, NodeType.VIDEO_GENERATOR, NodeType.AUDIO_GENERATOR, NodeType.VIDEO_ANALYZER, NodeType.IMAGE_EDITOR].map(t => { const ItemIcon = getNodeIcon(t); return (<button key={t} className="w-full text-left px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/10 rounded-lg flex items-center gap-2.5 transition-colors" onClick={() => { addNode(t, (contextMenu.x - pan.x) / scale, (contextMenu.y - pan.y) / scale); setContextMenu(null); }}> <ItemIcon size={12} className="text-cyan-400" /> {getNodeNameCN(t)} </button>); })}
+                                {[NodeType.PROMPT_INPUT, NodeType.IMAGE_GENERATOR, NodeType.VIDEO_GENERATOR, NodeType.IMAGE_TO_IMAGE, NodeType.IMAGE_TO_VIDEO, NodeType.AUDIO_GENERATOR, NodeType.VIDEO_ANALYZER, NodeType.IMAGE_EDITOR].map(t => { const ItemIcon = getNodeIcon(t); return (<button key={t} className="w-full text-left px-3 py-2 text-xs font-medium text-slate-200 hover:bg-white/10 rounded-lg flex items-center gap-2.5 transition-colors" onClick={() => { addNode(t as NodeType, (contextMenu.x - pan.x) / scale, (contextMenu.y - pan.y) / scale); setContextMenu(null); }}> <ItemIcon size={12} className="text-cyan-400" /> {getNodeNameCN(t)} </button>); })}
                             </>
                         )}
                         {contextMenuTarget?.type === 'group' && (
