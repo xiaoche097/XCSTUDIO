@@ -21,11 +21,15 @@ export interface AgentInfo {
 }
 
 export interface AgentRoutingDecision {
+  action?: 'route' | 'clarify' | 'respond';
   targetAgent: AgentType;
   taskType: string;
   complexity: 'simple' | 'complex';
   handoffMessage: string;
   confidence: number;
+  message?: string;
+  questions?: string[];
+  suggestions?: string[];
 }
 
 export type TaskStatus = 'pending' | 'analyzing' | 'executing' | 'completed' | 'failed';
@@ -57,6 +61,8 @@ export interface AgentTask {
     analysis?: string;
     preGenerationMessage?: string;
     postGenerationSummary?: string;
+    questions?: string[];
+    suggestions?: string[];
     proposals?: AgentProposal[];
     assets?: GeneratedAsset[];
     imageUrls?: string[];

@@ -53,7 +53,7 @@ export async function smartEditSkill(params: SmartEditParams): Promise<string | 
       result = await editImage({
         sourceImage: params.sourceUrl,
         maskImage: params.maskImage,
-        prompt: finalPrompt,
+        prompt: `${params.parameters?.preservePrompt || 'Preserve identity, layout, lighting, materials, and all untouched areas.'} ${finalPrompt}`.trim(),
         model: editModel,
         aspectRatio: params.parameters?.aspectRatio || '1:1',
         referenceImages: params.parameters?.referenceImages,

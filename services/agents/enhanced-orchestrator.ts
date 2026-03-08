@@ -4,6 +4,7 @@
  */
 
 import { AgentRoutingDecision, ProjectContext, AgentType } from '../../types/agent.types';
+import type { DesignTaskMode } from '../../types/common';
 import { COCO_SYSTEM_PROMPT } from './prompts/coco.prompt';
 import { errorHandler, ErrorType } from '../../utils/error-handler';
 import { getApiKey, getBestModelId, generateJsonResponse } from '../gemini';
@@ -13,8 +14,8 @@ import { z } from 'zod';
 
 /** Zod schema for AI routing response validation */
 const routingResponseSchema = z.object({
-    action: z.literal('route'),
-    targetAgent: z.string().min(1),
+    action: z.enum(['route', 'clarify', 'respond']).default('route'),
+    targetAgent: z.string().min(1).optional(),
     taskType: z.string().default('general'),
     complexity: z.enum(['simple', 'complex']).default('simple'),
     handoffMessage: z.string().default('正在处理您的请求...'),
@@ -22,6 +23,9 @@ const routingResponseSchema = z.object({
     fallbackOptions: z.array(z.string()).default([]),
     estimatedDuration: z.number().default(30),
     requiredSkills: z.array(z.string()).default([]),
+    message: z.string().optional(),
+    questions: z.array(z.string()).default([]),
+    suggestions: z.array(z.string()).default([]),
 });
 
 /** Circuit breaker state */
@@ -88,9 +92,24 @@ const DEFAULT_CONFIG: RouteConfig = {
  * 增强的路由决策
  */
 export interface EnhancedRoutingDecision extends AgentRoutingDecision {
+    action?: 'route' | 'clarify' | 'respond';
+    taskMode?: DesignTaskMode;
     fallbackOptions?: AgentType[];
     estimatedDuration?: number;
     requiredSkills?: string[];
+}
+
+function inferTaskMode(message: string, context: ProjectContext): DesignTaskMode {
+    const lower = message.toLowerCase();
+    const sessionMode = context.designSession?.taskMode;
+
+    if (/研究|参考|灵感|趋势|搜索|research|reference/i.test(lower)) return 'research';
+    if (/排版|版式|layout/i.test(lower)) return 'layout-edit';
+    if (/文字|文案|改字|text/i.test(lower)) return 'text-edit';
+    if (/局部|圈选|点选|区域|局部修改|touch/i.test(lower)) return 'touch-edit';
+    if (/修改|替换|编辑|改成|换成|edit|replace|remove/i.test(lower)) return 'edit';
+    if (sessionMode && sessionMode !== 'generate') return sessionMode;
+    return 'generate';
 }
 
 /**
@@ -139,8 +158,10 @@ export async function routeToAgent(
         if (localAgent) {
             console.log('[EnhancedOrchestrator] Local pre-route hit:', localAgent);
             return {
+                action: 'route',
                 targetAgent: localAgent,
                 taskType: 'local-routed',
+                taskMode: inferTaskMode(message, context),
                 complexity: 'simple',
                 handoffMessage: `用户请求: ${message}`,
                 confidence: 0.75,
@@ -152,7 +173,7 @@ export async function routeToAgent(
 
         // 检查API密钥
         const apiKeyCheck = getApiKey();
-        if (!apiKeyCheck || apiKeyCheck === 'PLACEHOLDER') {
+        if (!apiKeyCheck) {
             throw errorHandler.createError(
                 ErrorType.API,
                 'API密钥未配置，请在设置中配置',
@@ -174,6 +195,7 @@ export async function routeToAgent(
 
 Current Project: ${context.projectTitle}
 Brand Info: ${JSON.stringify(context.brandInfo || {})}
+Design Session: ${JSON.stringify(context.designSession || {})}
 Conversation History:
 ${historyText}
 
@@ -245,7 +267,9 @@ Analyze and route to appropriate agent. Return JSON with:
             console.warn(
                 `[EnhancedOrchestrator] Low confidence (${parsed.confidence}), adding fallbacks`
             );
-            parsed.fallbackOptions = [finalConfig.fallbackAgent];
+            if (parsed.action === 'route') {
+                parsed.fallbackOptions = [finalConfig.fallbackAgent];
+            }
         }
 
         // 熔断器：成功时重置
@@ -254,15 +278,28 @@ Analyze and route to appropriate agent. Return JSON with:
 
         // 返回增强的路由决策
         const decision: EnhancedRoutingDecision = {
-            targetAgent: parsed.targetAgent.toLowerCase() as AgentType,
+            action: parsed.action,
+            targetAgent: (parsed.targetAgent || finalConfig.fallbackAgent).toLowerCase() as AgentType,
             taskType: parsed.taskType,
+            taskMode: inferTaskMode(message, context),
             complexity: parsed.complexity,
             handoffMessage: parsed.handoffMessage,
             confidence: parsed.confidence,
             fallbackOptions: parsed.fallbackOptions as AgentType[],
             estimatedDuration: parsed.estimatedDuration,
-            requiredSkills: parsed.requiredSkills
+            requiredSkills: parsed.requiredSkills,
+            message: parsed.message,
+            questions: parsed.questions,
+            suggestions: parsed.suggestions,
         };
+
+        if (decision.action === 'clarify' || decision.action === 'respond') {
+            decision.targetAgent = 'coco';
+            decision.taskType = decision.action;
+            decision.taskMode = decision.action;
+            decision.complexity = 'simple';
+            decision.handoffMessage = parsed.message || parsed.handoffMessage || '我先帮你梳理一下需求。';
+        }
 
         // 写入缓存（仅高置信度结果）
         routingCache.set(cacheKey, decision);
@@ -301,8 +338,10 @@ function createFallbackDecision(
     fallbackAgent: AgentType
 ): EnhancedRoutingDecision {
     return {
+        action: 'route',
         targetAgent: fallbackAgent,
         taskType: 'general',
+        taskMode: 'generate',
         complexity: 'simple',
         handoffMessage: '我将协助您处理这个请求',
         confidence: 0.5,

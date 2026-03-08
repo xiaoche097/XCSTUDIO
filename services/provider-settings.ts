@@ -66,8 +66,43 @@ const VIDEO_MODEL_ALIASES: Record<string, string> = {
 export const getDefaultProviders = (): ApiProviderConfig[] => {
   return [
     { id: 'yunwu', name: '云雾 (OpenAI)', baseUrl: 'https://yunwu.ai', apiKey: '' },
+    { id: 'plato', name: '柏拉图 (OpenAI)', baseUrl: 'https://api.bltcy.ai', apiKey: '' },
     { id: 'gemini', name: 'Gemini (原生)', baseUrl: 'https://generativelanguage.googleapis.com', apiKey: '' },
   ];
+};
+
+const mergeProviders = (
+  storedProviders: ApiProviderConfig[],
+  legacyKeys: { geminiKey: string; yunwuKey: string }
+): ApiProviderConfig[] => {
+  const defaults = getDefaultProviders();
+  const mergedDefaults = defaults.map((provider) => {
+    const stored = storedProviders.find((item) => item?.id === provider.id);
+
+    if (stored) {
+      return {
+        ...provider,
+        ...stored,
+        apiKey: typeof stored.apiKey === 'string' ? stored.apiKey : provider.apiKey,
+      };
+    }
+
+    if (provider.id === 'gemini' && legacyKeys.geminiKey) {
+      return { ...provider, apiKey: legacyKeys.geminiKey };
+    }
+
+    if (provider.id === 'yunwu' && legacyKeys.yunwuKey) {
+      return { ...provider, apiKey: legacyKeys.yunwuKey };
+    }
+
+    return provider;
+  });
+
+  const customProviders = storedProviders.filter(
+    (provider) => provider && typeof provider.id === 'string' && !defaults.some((item) => item.id === provider.id)
+  );
+
+  return [...mergedDefaults, ...customProviders];
 };
 
 const normalizeVideoModels = (models: string[]): string[] => {
@@ -92,22 +127,23 @@ const safeJsonArray = (value: string | null, fallback: string[]): string[] => {
 
 export const loadProviderSettings = (): LoadedProviderSettings => {
   const storedProviders = localStorage.getItem('api_providers');
+  const geminiKey = localStorage.getItem('gemini_api_key') || '';
+  const yunwuKey = localStorage.getItem('yunwu_api_key') || '';
   let providers = getDefaultProviders();
 
   if (storedProviders) {
     try {
       const parsed = JSON.parse(storedProviders);
       if (Array.isArray(parsed) && parsed.length > 0) {
-        providers = parsed;
+        providers = mergeProviders(parsed, { geminiKey, yunwuKey });
       }
     } catch {
       // keep defaults
     }
   } else {
-    const geminiKey = localStorage.getItem('gemini_api_key') || '';
-    const yunwuKey = localStorage.getItem('yunwu_api_key') || '';
     providers = [
       { id: 'yunwu', name: '云雾 (OpenAI)', baseUrl: 'https://yunwu.ai', apiKey: yunwuKey },
+      { id: 'plato', name: '柏拉图 (OpenAI)', baseUrl: 'https://api.bltcy.ai', apiKey: '' },
       { id: 'gemini', name: 'Gemini (原生)', baseUrl: 'https://generativelanguage.googleapis.com', apiKey: geminiKey },
     ];
   }

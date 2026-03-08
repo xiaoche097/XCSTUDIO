@@ -41,6 +41,14 @@ const ExpandedView = ({ media, onClose }: { media: any, onClose: () => void }) =
     const [currentIndex, setCurrentIndex] = useState(0);
     const [videoBlobUrl, setVideoBlobUrl] = useState<string | null>(null);
     const [isLoadingVideo, setIsLoadingVideo] = useState(false);
+    const ownedVideoBlobUrlRef = useRef<string | null>(null);
+
+    const releaseOwnedVideoBlobUrl = useCallback(() => {
+        if (ownedVideoBlobUrlRef.current) {
+            URL.revokeObjectURL(ownedVideoBlobUrlRef.current);
+            ownedVideoBlobUrlRef.current = null;
+        }
+    }, []);
 
     useEffect(() => {
         if (media) {
@@ -85,13 +93,20 @@ const ExpandedView = ({ media, onClose }: { media: any, onClose: () => void }) =
 
     // Handle Video Blob Fetching for Expanded View
     useEffect(() => {
-        if (!media) return;
+        if (!media) {
+            releaseOwnedVideoBlobUrl();
+            setVideoBlobUrl(null);
+            setIsLoadingVideo(false);
+            return;
+        }
         const currentSrc = hasMultiple ? media.images[currentIndex] : media.src;
         const isVideo = (media.type === 'video') && !(currentSrc && currentSrc.startsWith('data:image'));
 
         if (isVideo) {
             if (currentSrc.startsWith('blob:') || currentSrc.startsWith('data:')) {
+                releaseOwnedVideoBlobUrl();
                 setVideoBlobUrl(currentSrc);
+                setIsLoadingVideo(false);
                 return;
             }
             setIsLoadingVideo(true);
@@ -102,16 +117,27 @@ const ExpandedView = ({ media, onClose }: { media: any, onClose: () => void }) =
                     if (active) {
                         // FORCE VIDEO/MP4
                         const mp4Blob = new Blob([blob], { type: 'video/mp4' });
-                        setVideoBlobUrl(URL.createObjectURL(mp4Blob));
+                        releaseOwnedVideoBlobUrl();
+                        const blobUrl = URL.createObjectURL(mp4Blob);
+                        ownedVideoBlobUrlRef.current = blobUrl;
+                        setVideoBlobUrl(blobUrl);
                         setIsLoadingVideo(false);
                     }
                 })
                 .catch(() => { if (active) setIsLoadingVideo(false); });
             return () => { active = false; };
         } else {
+            releaseOwnedVideoBlobUrl();
             setVideoBlobUrl(null);
+            setIsLoadingVideo(false);
         }
-    }, [media, currentIndex, hasMultiple]);
+    }, [media, currentIndex, hasMultiple, releaseOwnedVideoBlobUrl]);
+
+    useEffect(() => {
+        return () => {
+            releaseOwnedVideoBlobUrl();
+        };
+    }, [releaseOwnedVideoBlobUrl]);
 
 
     if (!media) return null;

@@ -6,6 +6,8 @@ type ValidationResult = {
   suggestedFix?: string;
 };
 
+export type { ValidationResult };
+
 const toInlinePart = async (url: string): Promise<{ inlineData: { mimeType: string; data: string } }> => {
   if (/^data:image\/.+;base64,/.test(url)) {
     const m = url.match(/^data:(.+);base64,(.+)$/);
@@ -80,6 +82,31 @@ export async function validateProductConsistency(
       { text: '上面是产品锚点图。' },
       generated,
       { text: '上面是待检图。若版型、结构线、颜色块、材质纹理有变化则 pass=false。' },
+    ],
+  });
+  return parseValidation(result.text);
+}
+
+export async function validateApprovedAnchorConsistency(
+  approvedUrl: string,
+  candidateUrl: string,
+  summaryText: string,
+  forbiddenChanges: string[],
+): Promise<ValidationResult> {
+  const [anchor, generated] = await Promise.all([toInlinePart(approvedUrl), toInlinePart(candidateUrl)]);
+  const result = await generateJsonResponse({
+    model: getBestModelId('text'),
+    operation: 'validateApprovedAnchorConsistency',
+    temperature: 0.1,
+    parts: [
+      {
+        text:
+          `你是通用设计一致性质检器。比较已批准锚点图与待检图，判断是否仍属于同一设计连续版本。\n锚点摘要: ${summaryText || '无'}\n禁止变化: ${(forbiddenChanges || []).join('；') || '无'}\n仅返回 JSON: {"pass":boolean,"reasons":string[],"suggestedFix":string}`,
+      },
+      anchor,
+      { text: '上面是已批准的设计锚点图。' },
+      generated,
+      { text: '上面是待检图。若主体身份、logo位置、关键配色、结构或文案布局明显偏离，则 pass=false。' },
     ],
   });
   return parseValidation(result.text);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import ReactDOM from "react-dom";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
@@ -106,6 +106,7 @@ import {
   analyzeImageRegion,
   analyzeProductSwapScene,
 } from "../services/gemini";
+import { validateApprovedAnchorConsistency } from "../services/validators";
 import {
   ChatMessage,
   Template,
@@ -125,6 +126,7 @@ import { getAgentInfo, executeAgentTask } from "../services/agents";
 import { localPreRoute } from "../services/agents/local-router";
 import { AgentAvatar } from "../components/agents/AgentAvatar";
 import { useAgentStore, normalizeInputBlocks } from "../stores/agent.store";
+import { useProjectStore } from "../stores/project.store";
 import {
   MessageList,
   AssistantSidebar,
@@ -155,11 +157,15 @@ import {
   addTopicMemoryItem,
   extractConstraintHints,
   saveTopicAsset,
+  rememberApprovedAsset,
   syncClothingTopicMemory,
   upsertTopicSnapshot,
   loadTopicSnapshot,
+  mergeUniqueStrings,
+  summarizeReferenceSet,
 } from "../services/topic-memory";
 import { getMemoryKey } from "../services/topicMemory/key";
+import type { DesignTaskMode } from "../types/common";
 import type {
   Requirements,
   ModelGenOptions,
@@ -1035,6 +1041,8 @@ const Workspace: React.FC = () => {
   const createConversationId = () =>
     `conv-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
+  const projectActions = useProjectStore((s) => s.actions);
+
   const getCurrentConversationId = () => String(activeConversationId || "").trim();
   const buildMemoryKey = (conversationId: string) => {
     const workspaceId = String(id || "").trim();
@@ -1058,6 +1066,155 @@ const Workspace: React.FC = () => {
     }
     return topicId;
   };
+
+  const getElementReferenceSummary = useCallback((element?: CanvasElement | null, extraRefs: string[] = []) => {
+    const refs = [
+      ...(element?.genRefImages || []),
+      element?.genRefImage || '',
+      ...(element?.genVideoRefs || []),
+      ...extraRefs,
+    ].filter(Boolean) as string[];
+    return summarizeReferenceSet(refs);
+  }, []);
+
+  const persistEditSession = useCallback(async (
+    mode: DesignTaskMode,
+    element: CanvasElement,
+    details: {
+      instruction: string;
+      referenceUrls?: string[];
+      analysis?: string;
+      constraints?: string[];
+      researchSummary?: string;
+    },
+  ) => {
+    const topicId = ensureTopicId();
+    const referenceSummary = getElementReferenceSummary(element, details.referenceUrls || []);
+    const normalizedConstraints = mergeUniqueStrings(
+      extractConstraintHints(details.instruction),
+      details.constraints || [],
+      20,
+    );
+
+    projectActions.updateDesignSession({
+      taskMode: mode,
+      referenceSummary,
+      subjectAnchors: mergeUniqueStrings(
+        useProjectStore.getState().designSession.subjectAnchors || [],
+        [...(details.referenceUrls || []), ...(element?.genRefImages || []), element?.genRefImage || ''].filter(Boolean) as string[],
+        8,
+      ),
+      constraints: mergeUniqueStrings(
+        useProjectStore.getState().designSession.constraints || [],
+        normalizedConstraints,
+        20,
+      ),
+      styleHints: mergeUniqueStrings(
+        useProjectStore.getState().designSession.styleHints || [],
+        [details.analysis || '', details.researchSummary || ''].filter(Boolean),
+        12,
+      ),
+      researchSummary: details.researchSummary || useProjectStore.getState().designSession.researchSummary,
+    });
+
+    if (topicId) {
+      await upsertTopicSnapshot(topicId, {
+        summaryText: referenceSummary,
+        pinned: {
+          constraints: normalizedConstraints,
+          decisions: mergeUniqueStrings(
+            useProjectStore.getState().designSession.styleHints || [],
+            [mode, details.analysis || ''].filter(Boolean),
+            20,
+          ),
+        },
+      });
+
+      await addTopicMemoryItem({
+        topicId,
+        type: 'instruction',
+        text: `[${mode}] ${details.instruction}`,
+      });
+
+      if (details.analysis) {
+        await addTopicMemoryItem({
+          topicId,
+          type: 'analysis',
+          text: details.analysis,
+        });
+      }
+    }
+  }, [getElementReferenceSummary, projectActions]);
+
+  const getDesignConsistencyContext = useCallback(() => {
+    const session = useProjectStore.getState().designSession;
+    return {
+      approvedAssetIds: session.approvedAssetIds || [],
+      subjectAnchors: session.subjectAnchors || [],
+      referenceSummary: session.referenceSummary,
+      forbiddenChanges: session.forbiddenChanges || [],
+    };
+  }, []);
+
+  const validateAgainstApprovedAnchor = useCallback(async (candidateUrl: string) => {
+    const session = useProjectStore.getState().designSession;
+    const approvedAnchor = session.subjectAnchors?.[session.subjectAnchors.length - 1];
+    if (!approvedAnchor || !candidateUrl) {
+      return { pass: true, reasons: [] as string[] };
+    }
+
+    try {
+      return await validateApprovedAnchorConsistency(
+        approvedAnchor,
+        candidateUrl,
+        session.referenceSummary || '',
+        session.forbiddenChanges || [],
+      );
+    } catch (error) {
+      console.warn('[Workspace] consistency validation skipped:', error);
+      return { pass: true, reasons: [] as string[] };
+    }
+  }, []);
+
+  const maybeWarnConsistencyDrift = useCallback(async (candidateUrl: string, label: string) => {
+    const validation = await validateAgainstApprovedAnchor(candidateUrl);
+    if (!validation.pass) {
+      addMessage({
+        id: `consistency-warn-${Date.now()}`,
+        role: "model",
+        text: `${label}与当前已采用版本存在偏差：${validation.reasons.join('；')}${validation.suggestedFix ? `。建议：${validation.suggestedFix}` : ''}`,
+        timestamp: Date.now(),
+        error: true,
+      });
+    }
+    return validation;
+  }, [validateAgainstApprovedAnchor]);
+
+  const retryWithConsistencyFix = useCallback(async (
+    label: string,
+    initialUrl: string,
+    rerun: (fixPrompt?: string) => Promise<string | null>,
+  ) => {
+    const validation = await maybeWarnConsistencyDrift(initialUrl, label);
+    if (validation.pass || !validation.suggestedFix) {
+      return initialUrl;
+    }
+
+    addMessage({
+      id: `consistency-retry-${Date.now()}`,
+      role: "model",
+      text: `${label}正在根据一致性质检建议自动修正一次：${validation.suggestedFix}`,
+      timestamp: Date.now(),
+    });
+
+    const retriedUrl = await rerun(validation.suggestedFix);
+    if (!retriedUrl) {
+      return initialUrl;
+    }
+
+    await maybeWarnConsistencyDrift(retriedUrl, `${label}（自动修正后）`);
+    return retriedUrl;
+  }, [maybeWarnConsistencyDrift]);
 
   useEffect(() => {
     const topicId = getCurrentTopicId();
@@ -1779,6 +1936,7 @@ const Workspace: React.FC = () => {
         },
       });
       if (result) {
+        await maybeWarnConsistencyDrift(result, '放大结果');
         await applyGeneratedImageToElement(newId, result, true);
       } else {
         setElements((prev) => {
@@ -1924,6 +2082,11 @@ const Workspace: React.FC = () => {
 
     try {
       const sourceImage = await urlToBase64(getElementSourceUrl(el) || el.url);
+      const preservePrompt = 'Preserve the original product identity, lighting direction, scene composition, typography, and all unmasked areas.';
+      await persistEditSession('edit', el, {
+        instruction: 'Remove objects in white mask area only. Keep black mask area unchanged. Blend naturally.',
+        constraints: ['仅修改白色蒙版区域', '保持未遮罩区域完全一致'],
+      });
       const result = await smartEditSkill({
         sourceUrl: sourceImage,
         maskImage: eraserMaskDataUrl,
@@ -1931,6 +2094,7 @@ const Workspace: React.FC = () => {
         parameters: {
           prompt:
             "Remove objects in white mask area only. Keep black mask area unchanged. Blend naturally.",
+          preservePrompt,
           editModel: "gemini-3-pro-image-preview",
           aspectRatio: (() => {
             const ratio = el.width / el.height;
@@ -1965,6 +2129,7 @@ const Workspace: React.FC = () => {
       });
 
       if (result) {
+        await maybeWarnConsistencyDrift(result, '矢量重绘结果');
         await applyGeneratedImageToElement(newId, result, true);
       } else {
         throw new Error("No result from eraser edit");
@@ -2013,6 +2178,10 @@ const Workspace: React.FC = () => {
     try {
       const base64Ref = await urlToBase64(el.url);
       const prompt = `【任务】将输入图像解析为专业级矢量线稿\n\n【自适应分析】\n首先识别画面主体类型，动态调整线条策略：\n- 生物类：捕捉毛发走向、皮肤褶皱、肌肉轮廓\n- 建筑/物品：强调结构边缘、材质分界、几何关系\n- 自然景观：表现植被层次、地形起伏、水纹流向\n- 织物/软质：体现垂坠感、褶皱逻辑、编织纹理\n\n【线条层级系统】\nL1 主轮廓：定义物体边界与剪影\nL2 结构线：表达体积转折、内部形态\nL3 细节线：材质特征、微观纹理走向\nL4 氛围线：暗示光影边界、空间深度（可选）\n\n【输出标准】\n✓ 纯黑白、线条闭合流畅、层次分明\n✗ 禁止：灰度填充、渐变、模糊、噪点`;
+      await persistEditSession('edit', el, {
+        instruction: 'Convert the image into a professional vector-style line drawing while preserving structure and key details.',
+        constraints: ['保持主体结构比例', '输出黑白线稿，不引入灰度噪点'],
+      });
 
       const result = await smartEditSkill({
         sourceUrl: base64Ref,
@@ -2020,6 +2189,7 @@ const Workspace: React.FC = () => {
         parameters: {
           factor: 2,
           prompt,
+          preservePrompt: 'Preserve the original silhouette, structure, and detail hierarchy while translating to clean vector-style line art.',
         },
       });
       if (result) {
@@ -2046,6 +2216,10 @@ const Workspace: React.FC = () => {
     setIsTouchEditing(true);
     try {
       const base64Ref = await urlToBase64(el.url);
+      await persistEditSession('touch-edit', el, {
+        instruction: `Analyze local region near (${clickX}, ${clickY}) for precise edit intent.`,
+        constraints: ['仅聚焦用户点选附近区域', '保持整体构图与主体一致'],
+      });
       const result = await touchEditSkill({
         imageData: base64Ref,
         regionX: clickX,
@@ -2079,6 +2253,12 @@ const Workspace: React.FC = () => {
     );
     try {
       const base64Ref = await urlToBase64(el.url);
+      const aspectRatio = getNearestAspectRatio(el.width, el.height);
+      await persistEditSession('touch-edit', el, {
+        instruction: touchEditInstruction,
+        analysis: touchEditPopup.analysis,
+        constraints: ['仅编辑目标区域', '保持整体视觉连续性'],
+      });
       const result = await touchEditSkill({
         imageData: base64Ref,
         regionX: 0,
@@ -2086,8 +2266,12 @@ const Workspace: React.FC = () => {
         regionWidth: el.width,
         regionHeight: el.height,
         editInstruction: touchEditInstruction,
+        aspectRatio,
+        preservePrompt:
+          'Preserve overall composition, perspective, identity, lighting, materials, typography, and all untouched regions. Apply a localized edit only where requested.',
       });
       if (result.editedImage) {
+        await maybeWarnConsistencyDrift(result.editedImage, '局部编辑结果');
         await applyGeneratedImageToElement(
           touchEditPopup.elementId,
           result.editedImage,
@@ -2242,10 +2426,22 @@ const Workspace: React.FC = () => {
         aspectRatio: "1:1",
         referenceImages:
           referenceImages.length > 0 ? referenceImages : undefined,
+        consistencyContext: getDesignConsistencyContext(),
       });
 
       if (resultUrl) {
-        await applyGeneratedImageToElement(id, resultUrl, false);
+        const finalUrl = await retryWithConsistencyFix(
+          '智能生成结果',
+          resultUrl,
+          async (fixPrompt?: string) => imageGenSkill({
+            prompt: fixPrompt ? `${prompt}\n\nConsistency fix: ${fixPrompt}` : prompt,
+            model: activeImageModel,
+            aspectRatio: "1:1",
+            referenceImages: referenceImages.length > 0 ? referenceImages : undefined,
+            consistencyContext: getDesignConsistencyContext(),
+          }),
+        );
+        await applyGeneratedImageToElement(id, finalUrl, false);
       } else {
         setElements((prev) =>
           prev.map((el) =>
@@ -3463,6 +3659,36 @@ const Workspace: React.FC = () => {
     elementsRef.current = nextElements;
     setElements(nextElements);
     saveToHistory(nextElements, markersRef.current);
+
+    const updatedElement = nextElements.find((e) => e.id === elementId);
+    const topicId = getCurrentTopicId();
+    const decisionText = updatedElement?.genPrompt
+      ? `已采用生成结果作为后续设计锚点: ${updatedElement.genPrompt}`
+      : `已采用资产 ${elementId} 作为后续设计锚点`;
+    const approvedIds = mergeUniqueStrings(
+      useProjectStore.getState().designSession.approvedAssetIds || [],
+      [elementId],
+      12,
+    );
+
+    projectActions.updateDesignSession({
+      approvedAssetIds: approvedIds,
+      subjectAnchors: mergeUniqueStrings(
+        useProjectStore.getState().designSession.subjectAnchors || [],
+        [originalUrl],
+        8,
+      ),
+      referenceSummary: summarizeReferenceSet([originalUrl]),
+    });
+
+    if (topicId) {
+      await rememberApprovedAsset(topicId, {
+        url: originalUrl,
+        role: 'result',
+        summary: summarizeReferenceSet([originalUrl]),
+        decision: decisionText,
+      });
+    }
   };
 
   const setElementGeneratingState = (elementId: string, isGenerating: boolean) => {
@@ -3489,13 +3715,21 @@ const Workspace: React.FC = () => {
 
     try {
       const base64Ref = await urlToBase64(el.url);
+      await persistEditSession('edit', el, {
+        instruction: 'Upscale this image while preserving identity, composition, and all visible details.',
+        constraints: ['提升清晰度与细节', '保持主体和构图不变'],
+      });
       const resultUrl = await smartEditSkill({
         sourceUrl: base64Ref,
         editType: "upscale",
-        parameters: { factor: 4 },
+        parameters: {
+          factor: 4,
+          preservePrompt: 'Preserve identity, composition, textures, text layout, and all visible details while increasing clarity and resolution.',
+        },
       });
 
       if (resultUrl) {
+        await maybeWarnConsistencyDrift(resultUrl, '放大结果');
         await applyGeneratedImageToElement(selectedElementId, resultUrl, true);
       } else {
         throw new Error("No result");
@@ -3514,12 +3748,20 @@ const Workspace: React.FC = () => {
 
     try {
       const base64Ref = await urlToBase64(el.url);
+      await persistEditSession('edit', el, {
+        instruction: 'Remove the background while preserving the main subject exactly.',
+        constraints: ['只移除背景', '保持主体轮廓和材质不变'],
+      });
       const resultUrl = await smartEditSkill({
         sourceUrl: base64Ref,
         editType: "background-remove",
+        parameters: {
+          preservePrompt: 'Preserve the exact subject identity, silhouette, materials, and visible details. Remove only the background.',
+        },
       });
 
       if (resultUrl) {
+        await maybeWarnConsistencyDrift(resultUrl, '去背结果');
         await applyGeneratedImageToElement(selectedElementId, resultUrl, true);
       } else {
         throw new Error("No result");
@@ -3573,6 +3815,12 @@ ${analysis}
       const prompt = buildProductSwapPrompt(analysisText);
 
       const allImages = [sceneBase64, ...productSwapImages];
+      await persistEditSession('edit', el, {
+        instruction: 'Swap the current product with the provided replacement product while preserving the original scene.',
+        referenceUrls: productSwapImages,
+        analysis: analysisText,
+        constraints: ['保持原场景光影和透视', '新产品必须真实贴合场景'],
+      });
 
       const result = await generateImage({
         prompt: prompt,
@@ -3580,10 +3828,23 @@ ${analysis}
         aspectRatio: targetAspectRatio,
         imageSize: productSwapRes === '1K' ? '1K' : productSwapRes === '2K' ? '2K' : '4K',
         referenceImages: allImages,
+        consistencyContext: getDesignConsistencyContext(),
       });
 
       if (result) {
-        await applyGeneratedImageToElement(newId, result, true);
+        const finalResult = await retryWithConsistencyFix(
+          '产品替换结果',
+          result,
+          async (fixPrompt?: string) => generateImage({
+            prompt: fixPrompt ? `${prompt}\n\nConsistency fix: ${fixPrompt}` : prompt,
+            model: 'Nano Banana Pro',
+            aspectRatio: targetAspectRatio,
+            imageSize: productSwapRes === '1K' ? '1K' : productSwapRes === '2K' ? '2K' : '4K',
+            referenceImages: allImages,
+            consistencyContext: getDesignConsistencyContext(),
+          }),
+        );
+        await applyGeneratedImageToElement(newId, finalResult, true);
       } else {
         throw new Error("No result generated");
       }
@@ -3658,15 +3919,31 @@ ${analysis}
 
     try {
       const base64Ref = await urlToBase64(el.url);
+      await persistEditSession('text-edit', el, {
+        instruction: editPrompt,
+        constraints: ['只修改图中文字', '保持字体风格、版式和背景尽量不变'],
+      });
       const resultUrl = await generateImage({
         prompt: editPrompt,
         model: (el.genModel as any) || "Nano Banana Pro",
         aspectRatio: targetAspectRatio,
         referenceImage: base64Ref,
+        consistencyContext: getDesignConsistencyContext(),
       });
 
       if (resultUrl) {
-        await applyGeneratedImageToElement(newId, resultUrl, true);
+        const finalUrl = await retryWithConsistencyFix(
+          '文字编辑结果',
+          resultUrl,
+          async (fixPrompt?: string) => generateImage({
+            prompt: fixPrompt ? `${editPrompt}\n\nConsistency fix: ${fixPrompt}` : editPrompt,
+            model: (el.genModel as any) || "Nano Banana Pro",
+            aspectRatio: targetAspectRatio,
+            referenceImage: base64Ref,
+            consistencyContext: getDesignConsistencyContext(),
+          }),
+        );
+        await applyGeneratedImageToElement(newId, finalUrl, true);
       } else {
         throw new Error("No result");
       }
@@ -3683,14 +3960,30 @@ ${analysis}
     setElementGeneratingState(selectedElementId, true);
     try {
       const base64Ref = await urlToBase64(el.url);
+      await persistEditSession('edit', el, {
+        instruction: fastEditPrompt,
+        constraints: ['在原图基础上做受控编辑', '尽量保持主体与构图连续性'],
+      });
       const resultUrl = await imageGenSkill({
         prompt: fastEditPrompt,
         model: (el.genModel as any) || "Nano Banana Pro",
         aspectRatio: el.genAspectRatio || "1:1",
         referenceImage: base64Ref,
+        consistencyContext: getDesignConsistencyContext(),
       });
       if (resultUrl) {
-        await applyGeneratedImageToElement(selectedElementId, resultUrl, true);
+        const finalUrl = await retryWithConsistencyFix(
+          '快速编辑结果',
+          resultUrl,
+          async (fixPrompt?: string) => imageGenSkill({
+            prompt: fixPrompt ? `${fastEditPrompt}\n\nConsistency fix: ${fixPrompt}` : fastEditPrompt,
+            model: (el.genModel as any) || "Nano Banana Pro",
+            aspectRatio: el.genAspectRatio || "1:1",
+            referenceImage: base64Ref,
+            consistencyContext: getDesignConsistencyContext(),
+          }),
+        );
+        await applyGeneratedImageToElement(selectedElementId, finalUrl, true);
         setShowFastEdit(false);
         setFastEditPrompt("");
       } else {
@@ -4525,9 +4818,22 @@ ${analysis}
         imageSize: el.genResolution,
         referenceImages:
           el.genRefImages || (el.genRefImage ? [el.genRefImage] : []),
+        consistencyContext: getDesignConsistencyContext(),
       });
       if (resultUrl) {
-        await applyGeneratedImageToElement(elementId, resultUrl, true);
+        const finalUrl = await retryWithConsistencyFix(
+          '重新生成结果',
+          resultUrl,
+          async (fixPrompt?: string) => imageGenSkill({
+            prompt: fixPrompt ? `${el.genPrompt}\n\nConsistency fix: ${fixPrompt}` : el.genPrompt,
+            model,
+            aspectRatio: currentAspectRatio,
+            imageSize: el.genResolution,
+            referenceImages: el.genRefImages || (el.genRefImage ? [el.genRefImage] : []),
+            consistencyContext: getDesignConsistencyContext(),
+          }),
+        );
+        await applyGeneratedImageToElement(elementId, finalUrl, true);
       } else {
         setElementGeneratingState(elementId, false);
       }

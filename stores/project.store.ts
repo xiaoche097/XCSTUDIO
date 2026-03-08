@@ -6,13 +6,7 @@
 import { create } from 'zustand';
 import { devtools, persist } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
-
-interface BrandInfo {
-  name?: string;
-  colors?: string[];
-  fonts?: string[];
-  style?: string;
-}
+import type { BrandInfo, DesignSessionState, DesignTaskMode } from '../types/common';
 
 interface ProjectSettings {
   autoSave: boolean;
@@ -30,6 +24,7 @@ interface ProjectState {
   
   // 品牌信息
   brandInfo: BrandInfo;
+  designSession: DesignSessionState;
   
   // 项目设置
   settings: ProjectSettings;
@@ -57,6 +52,8 @@ interface ProjectState {
     // 品牌信息
     setBrandInfo: (brandInfo: Partial<BrandInfo>) => void;
     updateBrandInfo: (updates: Partial<BrandInfo>) => void;
+    updateDesignSession: (updates: Partial<DesignSessionState>) => void;
+    setTaskMode: (taskMode: DesignTaskMode) => void;
     
     // 设置
     updateSettings: (settings: Partial<ProjectSettings>) => void;
@@ -86,6 +83,24 @@ const initialState: Omit<ProjectState, 'actions'> = {
     colors: [],
     fonts: [],
     style: ''
+  },
+
+  designSession: {
+    taskMode: 'generate',
+    brand: {
+      name: '',
+      colors: [],
+      fonts: [],
+      style: '',
+    },
+    styleHints: [],
+    subjectAnchors: [],
+    referenceSummary: '',
+    constraints: [],
+    forbiddenChanges: [],
+    approvedAssetIds: [],
+    researchSummary: '',
+    referenceWebPages: [],
   },
   
   settings: {
@@ -121,13 +136,38 @@ export const useProjectStore = create<ProjectState>()(
         
         setThumbnail: (thumbnail) => set({ thumbnail, updatedAt: Date.now() }),
         
-        setBrandInfo: (brandInfo) => set({ 
-          brandInfo: brandInfo as BrandInfo, 
-          updatedAt: Date.now() 
+        setBrandInfo: (brandInfo) => set((state) => {
+          state.brandInfo = brandInfo as BrandInfo;
+          state.designSession.brand = { ...state.designSession.brand, ...state.brandInfo };
+          state.updatedAt = Date.now();
         }),
         
         updateBrandInfo: (updates) => set((state) => {
           state.brandInfo = { ...state.brandInfo, ...updates };
+          state.designSession.brand = { ...state.designSession.brand, ...state.brandInfo };
+          state.updatedAt = Date.now();
+        }),
+
+        updateDesignSession: (updates) => set((state) => {
+          state.designSession = {
+            ...state.designSession,
+            ...updates,
+            brand: {
+              ...state.designSession.brand,
+              ...state.brandInfo,
+              ...(updates.brand || {}),
+            },
+            styleHints: updates.styleHints || state.designSession.styleHints,
+            subjectAnchors: updates.subjectAnchors || state.designSession.subjectAnchors,
+            constraints: updates.constraints || state.designSession.constraints,
+            forbiddenChanges: updates.forbiddenChanges || state.designSession.forbiddenChanges,
+            approvedAssetIds: updates.approvedAssetIds || state.designSession.approvedAssetIds,
+          };
+          state.updatedAt = Date.now();
+        }),
+
+        setTaskMode: (taskMode) => set((state) => {
+          state.designSession.taskMode = taskMode;
           state.updatedAt = Date.now();
         }),
         
@@ -157,6 +197,15 @@ export const useProjectStore = create<ProjectState>()(
         loadProject: (projectData) => set((state) => {
           const { actions: _actions, ...safeData } = projectData as any;
           Object.assign(state, safeData);
+          state.designSession = {
+            ...initialState.designSession,
+            ...state.designSession,
+            brand: {
+              ...initialState.designSession.brand,
+              ...state.brandInfo,
+              ...(state.designSession?.brand || {}),
+            },
+          };
           state.updatedAt = Date.now();
         })
       }
@@ -168,6 +217,7 @@ export const useProjectStore = create<ProjectState>()(
         title: state.title,
         description: state.description,
         brandInfo: state.brandInfo,
+        designSession: state.designSession,
         settings: state.settings,
         createdAt: state.createdAt,
         updatedAt: state.updatedAt

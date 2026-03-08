@@ -18,10 +18,14 @@ const pickRandomKey = (keys: string[]): string => {
 export const getRawConfig = () => {
     const activeProviderId = localStorage.getItem('api_provider') || 'yunwu';
     const providersRaw = localStorage.getItem('api_providers');
-
-    let providerBaseUrl = activeProviderId === 'gemini'
+    const isGeminiProvider = activeProviderId === 'gemini';
+    const defaultProviderBaseUrl = isGeminiProvider
         ? 'https://generativelanguage.googleapis.com'
-        : 'https://yunwu.ai';
+        : activeProviderId === 'plato'
+            ? 'https://api.bltcy.ai'
+            : 'https://yunwu.ai';
+
+    let providerBaseUrl = defaultProviderBaseUrl;
     let providerApiKey = '';
 
     if (providersRaw) {
@@ -43,7 +47,7 @@ export const getRawConfig = () => {
         }
     }
 
-    const legacyKey = activeProviderId === 'gemini'
+    const legacyKey = isGeminiProvider
         ? localStorage.getItem('gemini_api_key') || ''
         : localStorage.getItem('yunwu_api_key') || '';
 

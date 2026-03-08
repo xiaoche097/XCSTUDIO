@@ -229,6 +229,37 @@ export async function saveTopicAsset(topicId: string, role: TopicAssetRole, data
   return { assetId, role, url: data.url, createdAt: asset.createdAt };
 }
 
+export async function rememberApprovedAsset(
+  topicId: string,
+  data: { url: string; role?: TopicAssetRole; summary?: string; decision?: string },
+): Promise<AssetRef | null> {
+  if (!topicId || !data.url) return null;
+
+  const ref = await saveTopicAsset(topicId, data.role || 'result', {
+    url: data.url,
+    mime: 'image/png',
+  });
+
+  if (!ref) return null;
+
+  await addTopicMemoryItem({
+    topicId,
+    type: 'asset_tag',
+    text: data.decision || `approved_asset:${ref.assetId}`,
+    refs: [ref],
+  });
+
+  await upsertTopicSnapshot(topicId, {
+    summaryText: data.summary || '',
+    pinned: {
+      constraints: [],
+      decisions: [data.decision || `已采用资产 ${ref.assetId}`],
+    },
+  });
+
+  return ref;
+}
+
 export async function saveTopicAssetFromFile(topicId: string, role: TopicAssetRole, file: File): Promise<AssetRef | null> {
   return saveTopicAsset(topicId, role, { blob: file, mime: file.type || 'application/octet-stream' });
 }
@@ -277,6 +308,7 @@ export async function buildTopicPinnedContext(topicId: string): Promise<{ text: 
   ].filter((x): x is string => !!x).slice(0, 8);
 
   const blocks: string[] = [];
+  if (snapshot.summaryText) blocks.push(`参考摘要:\n${snapshot.summaryText}`);
   if (constraints.length) blocks.push(`硬约束:\n- ${constraints.slice(0, 12).join('\n- ')}`);
   if (c?.analysis?.anchorDescription) {
     blocks.push(`产品锚点描述:\n${c.analysis.anchorDescription}`);
@@ -301,6 +333,27 @@ export async function buildTopicPinnedContext(topicId: string): Promise<{ text: 
     text = compactBlocks.join('\n\n').slice(0, 4500);
   }
   return { text, refs };
+}
+
+export function summarizeReferenceSet(refs: string[]): string {
+  const normalized = dedupe((refs || []).filter(Boolean)).slice(0, 8);
+  if (normalized.length === 0) return '';
+
+  const hosts = dedupe(
+    normalized.map((value) => {
+      try {
+        return new URL(value).host;
+      } catch {
+        if (value.startsWith('data:')) return 'inline-image';
+        if (value.startsWith('ATTACHMENT_')) return 'attachment';
+        return 'local-reference';
+      }
+    }),
+  );
+
+  const hostLabel = hosts.slice(0, 3).join(' / ');
+  const angleHint = normalized.length > 1 ? '同一主体的多角度/多细节参考' : '单主体参考';
+  return `共 ${normalized.length} 张参考图，来源: ${hostLabel}。按 ${angleHint} 理解，保持主体轮廓、材质、logo 位置、核心配色与关键结构一致。`;
 }
 
 export async function deleteTopicMemory(topicId: string): Promise<void> {
@@ -359,4 +412,8 @@ function dedupe(items: string[]): string[] {
 
 function normalizeText(s: string): string {
   return (s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+export function mergeUniqueStrings(existing: string[], incoming: string[], limit: number = 20): string[] {
+  return dedupe([...(existing || []), ...(incoming || [])]).slice(-limit);
 }

@@ -80,14 +80,15 @@ CRITICAL: You MUST respond with ONLY valid JSON. Do NOT include markdown code bl
     "id": "1",
     "title": "九宫格分镜图",
     "description": "（中文）分镜叙事逻辑说明",
-    "skillCalls": [{
-      "skillName": "generateImage",
-      "params": {
-        "prompt": "（中文九宫格提示词，按框架格式，包含完整9个镜头描述）",
-        "referenceImage": "ATTACHMENT_0",
-        "aspectRatio": "16:9",
-        "model": "Nano Banana Pro"
-      }
+      "skillCalls": [{
+        "skillName": "generateImage",
+        "params": {
+          "prompt": "（中文九宫格提示词，按框架格式，包含完整9个镜头描述）",
+          "referenceImages": ["ATTACHMENT_0", "ATTACHMENT_1"],
+          "referenceImage": "ATTACHMENT_0",
+          "aspectRatio": "16:9",
+          "model": "Nano Banana Pro"
+        }
     }]
   }],
   "message": "（中文）回复用户，说明你设计的分镜逻辑"
@@ -101,14 +102,15 @@ CRITICAL: You MUST respond with ONLY valid JSON. Do NOT include markdown code bl
     "id": "1",
     "title": "视频生成策略",
     "description": "（中文）策略说明",
-    "skillCalls": [{
-      "skillName": "generateVideo",
-      "params": {
-        "prompt": "（适配目标模型的视频提示词）",
-        "referenceImage": "ATTACHMENT_0",
-        "aspectRatio": "16:9",
-        "model": "Veo 3.1"
-      }
+      "skillCalls": [{
+        "skillName": "generateVideo",
+        "params": {
+          "prompt": "（适配目标模型的视频提示词）",
+          "referenceImages": ["ATTACHMENT_0", "ATTACHMENT_1"],
+          "referenceImage": "ATTACHMENT_0",
+          "aspectRatio": "16:9",
+          "model": "Veo 3.1"
+        }
     }]
   }],
   "message": "（中文）完整的策略报告：分镜解析表 + 策略选择理由 + 视频提示词 + 后期建议"

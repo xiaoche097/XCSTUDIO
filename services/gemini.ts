@@ -26,6 +26,13 @@ export const getProviderConfig = () => {
             baseUrl: 'https://yunwu.ai',
             apiKey: localStorage.getItem('yunwu_api_key') || ''
         };
+    } else if (providerId === 'plato') {
+        return {
+            id: 'plato',
+            name: '柏拉图',
+            baseUrl: 'https://api.bltcy.ai',
+            apiKey: ''
+        };
     } else if (providerId === 'gemini') {
         return {
             id: 'gemini',
@@ -66,7 +73,24 @@ export const getApiKey = (all: boolean = false) => {
             return selectedKey;
         }
     }
-    return all ? [] : 'PLACEHOLDER';
+    return all ? [] : '';
+};
+
+const requireApiKey = (stage: string): string => {
+    const provider = getProviderConfig();
+    const key = getApiKey();
+    if (typeof key === 'string' && key.trim()) {
+        return key;
+    }
+
+    throw new ProviderError({
+        provider: provider.id || 'unknown',
+        code: 'API_KEY_MISSING',
+        retryable: false,
+        stage: 'config',
+        details: `missing_api_key:${stage}`,
+        message: 'API 密钥未配置，请先在设置中填写并保存可用密钥。',
+    });
 };
 
 /**
@@ -251,7 +275,7 @@ export const generateJsonResponse = async (
         };
     }
 
-    const apiKey = getApiKey();
+    const apiKey = requireApiKey('generateJsonResponse');
     const openAIContent = toOpenAIMessageContent(parts);
 
     const body = {
@@ -464,7 +488,7 @@ export const getBestModelId = (type: 'text' | 'image' | 'video' | 'thinking' = '
 };
 
 export const getClient = () => {
-    const config: any = { apiKey: getApiKey() };
+    const config: any = { apiKey: requireApiKey('getClient') };
     let baseUrl = getApiUrl();
     if (baseUrl) {
         // SDK 内部会自动拼装 v1/v1beta，这里需要移除版本后缀以避免重复
@@ -875,7 +899,7 @@ export const sendMessage = async (
             const openAIChat = chat as OpenAIChatSession;
             const provider = getProviderConfig();
             const baseUrl = normalizeUrl(provider.baseUrl || '');
-            const apiKey = getApiKey();
+            const apiKey = requireApiKey('sendMessage');
 
             const openAIContent = toOpenAIMessageContent(parts as any);
             const historyMessages = (openAIChat.history || []).flatMap((item) => {
@@ -1121,6 +1145,12 @@ export interface ImageGenerationConfig {
     referenceStrength?: number;
     referencePriority?: 'first' | 'all';
     referenceMode?: 'style' | 'product';
+    consistencyContext?: {
+        approvedAssetIds?: string[];
+        subjectAnchors?: string[];
+        referenceSummary?: string;
+        forbiddenChanges?: string[];
+    };
 }
 
 export interface ImageEditConfig {
@@ -1142,9 +1172,18 @@ const strengthToRepeats = (strength: number): number => {
 
 const buildConstrainedPrompt = (
     userPrompt: string,
-    opts: { strength: number; mode: 'style' | 'product' },
+    opts: {
+        strength: number;
+        mode: 'style' | 'product';
+        referenceCount?: number;
+        priority?: 'first' | 'all';
+        forbiddenChanges?: string[];
+        approvedSummary?: string;
+    },
 ): string => {
     const hard = opts.strength >= 0.7;
+    const referenceCount = Math.max(0, opts.referenceCount || 0);
+    const multiReference = referenceCount > 1;
     const constraints = opts.mode === 'product'
         ? `
 [Consistency Requirements]
@@ -1159,6 +1198,22 @@ const buildConstrainedPrompt = (
 - Preserve the overall mood and design direction across outputs.
 `;
 
+    const referenceInstructions = multiReference
+        ? `
+[Multi-Reference Policy]
+- Treat all reference images as the same subject shown from different angles or with complementary details.
+- Synthesize identity using ALL references together instead of copying only the first image.
+- If references conflict, prioritize silhouette, logo placement, signature details, material texture, and core color family.
+- Merge the strongest consistent traits across all references into one coherent final subject.
+`
+        : opts.priority === 'first'
+            ? `
+[Reference Priority]
+- The first reference is the primary identity anchor.
+- Secondary references may add detail, but must not override the main subject identity.
+`
+            : '';
+
     const negatives = hard
         ? `
 [Do Not]
@@ -1168,7 +1223,22 @@ const buildConstrainedPrompt = (
 `
         : '';
 
-    return `${constraints}${negatives}
+    const approvedContext = opts.approvedSummary
+        ? `
+[Approved Anchor]
+- Continue from the latest approved result as the current design baseline.
+- Approved summary: ${opts.approvedSummary}
+`
+        : '';
+
+    const forbiddenSection = opts.forbiddenChanges && opts.forbiddenChanges.length > 0
+        ? `
+[Forbidden Changes]
+${opts.forbiddenChanges.map((item) => `- ${item}`).join('\n')}
+`
+        : '';
+
+    return `${constraints}${referenceInstructions}${approvedContext}${forbiddenSection}${negatives}
 [User Request]
 ${userPrompt}`.trim();
 };
@@ -1321,7 +1391,7 @@ const generateImageDallE3 = async (
     aspectRatio: string
 ): Promise<string | null> => {
     const baseUrl = normalizeUrl(getApiUrl() || 'https://yunwu.ai');
-    const apiKey = getApiKey();
+    const apiKey = requireApiKey('generateImageDallE3');
 
     // 将宽高比转换为 dall-e-3 支持的尺寸
     let size = '1024x1024';
@@ -1443,8 +1513,8 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
     const parts: any[] = [];
 
     const strength = clamp01(Number.isFinite(config.referenceStrength as number) ? Number(config.referenceStrength) : 0.75);
-    const priority = config.referencePriority || 'first';
     const mode = config.referenceMode || 'product';
+    const priority = config.referencePriority || (references.length > 1 ? 'all' : 'first');
     const repeats = hasReferences && priority === 'first' ? strengthToRepeats(strength) : 1;
 
     const orderedReferences = priority === 'first'
@@ -1475,8 +1545,16 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
         }
     }
 
-    const finalPrompt = hasReferences
-        ? buildConstrainedPrompt(config.prompt, { strength, mode })
+    const consistencyContext = config.consistencyContext || {};
+    const finalPrompt = hasReferences || consistencyContext?.forbiddenChanges?.length || consistencyContext?.referenceSummary
+        ? buildConstrainedPrompt(config.prompt, {
+            strength,
+            mode,
+            referenceCount: references.length,
+            priority,
+            forbiddenChanges: consistencyContext?.forbiddenChanges,
+            approvedSummary: consistencyContext?.referenceSummary,
+        })
         : config.prompt;
     parts.push({ text: finalPrompt });
 
@@ -1581,7 +1659,7 @@ export const generateVideo = async (config: VideoGenerationConfig): Promise<stri
 
         const modelId = normalizeVideoModelId(targetModelId || VEO_FAST_MODEL);
         const baseUrl = getVideoBaseUrl();
-        const apiKey = getApiKey();
+        const apiKey = requireApiKey('generateVideo');
         console.log(`[generateVideo] model=${modelId}, baseUrl=${baseUrl}, prompt=${config.prompt.slice(0, 50)}...`);
 
         // 2. Build request body

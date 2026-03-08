@@ -20,7 +20,7 @@ import {
     refreshProviderModels,
 } from '../services/provider-settings';
 
-type ApiProvider = 'gemini' | 'yunwu' | 'custom';
+type ApiProvider = 'gemini' | 'yunwu' | 'plato' | 'custom';
 type SettingsTab = 'api' | 'mapping' | 'hosting' | 'advanced' | 'storage' | 'about';
 const AUTO_IMAGE_OPTION_ID = 'Auto';
 

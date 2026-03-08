@@ -65,15 +65,16 @@ ${SHARED_JSON_RULES}
   "skillCalls": [
     {
       "skillName": "generateImage",
-      "params": {
-        "prompt": "[Subject]..., [Style]..., [Composition]..., [Lighting]..., [Quality]...",
-        "model": "Nano Banana Pro",
-        "aspectRatio": "3:4",
-        "reference_image_url": "https://example.com/reference.jpg",
-        "init_image": "https://example.com/reference.jpg"
+        "params": {
+          "prompt": "[Subject]..., [Style]..., [Composition]..., [Lighting]..., [Quality]...",
+          "model": "Nano Banana Pro",
+          "aspectRatio": "3:4",
+          "referenceImages": ["https://example.com/reference-1.jpg", "https://example.com/reference-2.jpg"],
+          "reference_image_url": "https://example.com/reference-1.jpg",
+          "init_image": "https://example.com/reference-1.jpg"
+        }
       }
-    }
-  ],
+    ],
   "postGenerationSummary": "本版画面在光线层次、色彩统一和主体聚焦上表现稳定，可继续微调字体与局部细节。"
 }
 

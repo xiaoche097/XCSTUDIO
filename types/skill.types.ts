@@ -18,6 +18,12 @@ export interface ImageGenSkillParams {
     colors?: string[];
     style?: string;
   };
+  consistencyContext?: {
+    approvedAssetIds?: string[];
+    subjectAnchors?: string[];
+    referenceSummary?: string;
+    forbiddenChanges?: string[];
+  };
 }
 
 export interface VideoGenSkillParams {
@@ -45,4 +51,6 @@ export interface TouchEditSkillParams {
   regionWidth: number;
   regionHeight: number;
   editInstruction: string;
+  aspectRatio?: string;
+  preservePrompt?: string;
 }

@@ -7,7 +7,8 @@ import { useAgentStore } from '../stores/agent.store';
 import { uploadImage } from '../utils/uploader';
 import { useImageHostStore } from '../stores/imageHost.store';
 import { localPreRoute } from '../services/agents/local-router';
-import { addTopicMemoryItem, buildTopicPinnedContext, extractConstraintHints, upsertTopicSnapshot } from '../services/topic-memory';
+import { addTopicMemoryItem, buildTopicPinnedContext, extractConstraintHints, mergeUniqueStrings, upsertTopicSnapshot } from '../services/topic-memory';
+import { summarizeReferenceSet } from '../services/topic-memory';
 import { getMemoryKey } from '../services/topicMemory/key';
 import {
   detectExplicitAgentPin,
@@ -15,6 +16,18 @@ import {
   stripOptimizePipelineCommand,
 } from '../services/agents/prompt-optimizer/intent';
 import { optimizeUserText } from '../services/agents/prompt-optimizer/service';
+import { useProjectStore } from '../stores/project.store';
+import { rememberApprovedAsset } from '../services/topic-memory';
+
+const inferTaskModeFromRequest = (message: string, metadata?: Record<string, any>) => {
+  const lower = String(message || '').toLowerCase();
+  if (metadata?.enableWebSearch || metadata?.multimodalContext?.research) return 'research' as const;
+  if (metadata?.skillData?.name?.toLowerCase?.().includes('text') || /文字|文案|改字|text/i.test(lower)) return 'text-edit' as const;
+  if (/排版|版式|layout/i.test(lower)) return 'layout-edit' as const;
+  if (/局部|圈选|区域|点选|touch/i.test(lower)) return 'touch-edit' as const;
+  if (/修改|替换|编辑|改成|换成|edit|replace|remove/i.test(lower)) return 'edit' as const;
+  return 'generate' as const;
+};
 
 interface CanvasState {
   elements: CanvasElement[];
@@ -47,6 +60,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
 
   const [isProcessing, setIsProcessing] = useState(false);
   const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
+  const isProcessingRef = useRef(false);
   const messageQueue = useRef<Array<{
     message: string;
     attachments?: File[];
@@ -127,12 +141,13 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
   ): Promise<AgentTask | null> => {
     if (!message.trim()) return null;
 
-    if (isProcessing) {
+    if (isProcessingRef.current) {
       messageQueue.current.push({ message, attachments, metadata, userMessageId });
       console.log('[useAgentOrchestrator] Message queued, queue size:', messageQueue.current.length);
       return null;
     }
 
+    isProcessingRef.current = true;
     setIsProcessing(true);
 
     let executingTimer: ReturnType<typeof setTimeout> | null = null;
@@ -205,6 +220,10 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
       ).trim();
       let topicPinnedContext = '';
       let topicPinnedRefs: string[] = [];
+      const projectActions = useProjectStore.getState().actions;
+      const inferredTaskMode = inferTaskModeFromRequest(message, metadata);
+      projectActions.setTaskMode(inferredTaskMode);
+
       if (topicId) {
         try {
           const pinned = await buildTopicPinnedContext(topicId);
@@ -337,6 +356,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
       } else if (localAgent) {
         console.log('[useAgentOrchestrator] Local pre-route hit:', localAgent);
         decision = {
+          action: 'route' as const,
           targetAgent: localAgent,
           taskType: 'local-routed',
           complexity: 'simple' as const,
@@ -356,6 +376,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
       if (!decision) {
         console.warn('[useAgentOrchestrator] All routing failed, using poster fallback');
         decision = {
+          action: 'route' as const,
           targetAgent: 'poster' as AgentType,
           taskType: 'fallback',
           complexity: 'simple' as const,
@@ -366,10 +387,40 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
 
       console.log('[useAgentOrchestrator] Routed to:', decision.targetAgent);
 
+      if (decision.action === 'respond' || decision.action === 'clarify') {
+        const guidance = [
+          ...(decision.questions || []),
+          ...(decision.suggestions || []),
+        ].filter(Boolean);
+        const guidanceText = guidance.length > 0 ? `\n\n${guidance.join('\n')}` : '';
+        const responseTask: AgentTask = {
+          id: `task-${Date.now()}`,
+          agentId: 'coco',
+          status: 'completed',
+          input: {
+            message: messageForExecution,
+            attachments,
+            uploadedAttachments: uploadedUrls.length > 0 ? uploadedUrls : undefined,
+            context: updatedContext,
+            metadata,
+          },
+          output: {
+            message: `${decision.message || decision.handoffMessage || '我先帮你梳理一下需求。'}${guidanceText}`,
+            questions: decision.questions,
+            suggestions: decision.suggestions,
+          },
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        setCurrentTask(responseTask);
+        return responseTask;
+      }
+
       const taskMetadata = {
         ...(metadata || {}),
         topicId,
         topicPinnedContext,
+        taskMode: inferredTaskMode,
         originalMessage: message,
         optimizedMessage: optimizedMessageForTrace,
         optimizerUsed,
@@ -388,8 +439,65 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
               (((metadata?.multimodalContext?.referenceImageUrls as string[]) || []).length) +
               uploadedUrls.length >
             0,
+          referenceSummary: summarizeReferenceSet([
+            ...topicPinnedRefs,
+            ...((metadata?.multimodalContext?.referenceImageUrls as string[]) || []),
+            ...uploadedUrls,
+          ]),
         },
       };
+
+      const existingDesignSession = projectContext.designSession;
+      const sessionConstraints = extractConstraintHints(message);
+      projectActions.updateDesignSession({
+        taskMode: inferredTaskMode,
+        referenceSummary: taskMetadata.multimodalContext.referenceSummary,
+        subjectAnchors: taskMetadata.multimodalContext.referenceImageUrls.slice(0, 8),
+        styleHints: mergeUniqueStrings([
+          ...(existingDesignSession?.styleHints || []),
+          typeof metadata?.creationMode === 'string' ? metadata.creationMode : '',
+          typeof metadata?.multimodalContext?.research?.reportBrief === 'string'
+            ? metadata.multimodalContext.research.reportBrief
+            : '',
+        ].filter(Boolean), [], 8),
+        constraints: mergeUniqueStrings([
+          ...(existingDesignSession?.constraints || []),
+          ...sessionConstraints,
+        ], [], 20),
+        researchSummary: typeof metadata?.multimodalContext?.research?.reportBrief === 'string'
+          ? metadata.multimodalContext.research.reportBrief
+          : existingDesignSession?.researchSummary,
+        referenceWebPages: Array.isArray(metadata?.multimodalContext?.referenceWebPages)
+          ? metadata.multimodalContext.referenceWebPages.slice(0, 8)
+          : existingDesignSession?.referenceWebPages,
+      });
+
+      if (topicId) {
+        const researchBrief = metadata?.multimodalContext?.research?.reportBrief;
+        const topicConstraints = mergeUniqueStrings(
+          sessionConstraints,
+          typeof researchBrief === 'string' && researchBrief ? [researchBrief] : [],
+          20,
+        );
+        const topicDecisions = mergeUniqueStrings(
+          existingDesignSession?.styleHints || [],
+          typeof metadata?.creationMode === 'string' ? [metadata.creationMode] : [],
+          20,
+        );
+        await upsertTopicSnapshot(topicId, {
+          summaryText: taskMetadata.multimodalContext.referenceSummary || existingDesignSession?.referenceSummary || '',
+          pinned: {
+            constraints: topicConstraints,
+            decisions: topicDecisions,
+          },
+        });
+      }
+
+      if (topicId && taskMetadata.multimodalContext.referenceSummary) {
+        await upsertTopicSnapshot(topicId, {
+          summaryText: taskMetadata.multimodalContext.referenceSummary,
+        });
+      }
 
       const originalAttachmentCount = attachments?.length || 0;
       const originalUploadedCount = uploadedUrls.length;
@@ -453,6 +561,39 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
         addAssetsToCanvas(result.output.assets);
       }
 
+      const approvedUrls = [
+        ...(result.output?.imageUrls || []),
+        ...((result.output?.assets || [])
+          .filter((asset) => asset?.type === 'image' && typeof asset.url === 'string')
+          .map((asset) => asset.url)),
+      ].filter((url, index, arr) => !!url && arr.indexOf(url) === index);
+
+      if (topicId && approvedUrls.length > 0) {
+        const approvedAssetIds = mergeUniqueStrings(
+          useProjectStore.getState().designSession.approvedAssetIds || [],
+          approvedUrls,
+          12,
+        );
+        projectActions.updateDesignSession({
+          approvedAssetIds,
+          subjectAnchors: mergeUniqueStrings(
+            useProjectStore.getState().designSession.subjectAnchors || [],
+            approvedUrls,
+            8,
+          ),
+          referenceSummary: summarizeReferenceSet(approvedUrls),
+        });
+
+        for (const url of approvedUrls.slice(0, 4)) {
+          await rememberApprovedAsset(topicId, {
+            url,
+            role: 'result',
+            summary: summarizeReferenceSet([url]),
+            decision: `Agent 输出已采用为后续设计锚点: ${decision.targetAgent}`,
+          });
+        }
+      }
+
       setCurrentTask(result);
 
       // Messages are managed by Workspace via addMessage — no need to push here
@@ -485,19 +626,21 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
         clearTimeout(executingTimer);
       }
       setIsUploadingAttachments(false);
+      isProcessingRef.current = false;
       setIsProcessing(false);
 
       if (messageQueue.current.length > 0) {
         const next = messageQueue.current.shift()!;
-        setTimeout(() => {
+        queueMicrotask(() => {
           processMessage(next.message, next.attachments, next.metadata, next.userMessageId);
-        }, 300);
+        });
       }
     }
-  }, [projectContext, addAssetsToCanvas, isProcessing]);
+  }, [projectContext, addAssetsToCanvas]);
 
   const executeProposal = useCallback(async (proposalId: string): Promise<void> => {
     const curTask = useAgentStore.getState().currentTask;
+    const projectActions = useProjectStore.getState().actions;
     if (!curTask || !curTask.output?.proposals) {
       console.error('[useAgentOrchestrator] No current task or proposals');
       return;
@@ -551,6 +694,39 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
         addAssetsToCanvas(result.output.assets);
       }
 
+      const proposalApprovedUrls = [
+        ...(result.output?.imageUrls || []),
+        ...((result.output?.assets || [])
+          .filter((asset) => asset?.type === 'image' && typeof asset.url === 'string')
+          .map((asset) => asset.url)),
+      ].filter((url, index, arr) => !!url && arr.indexOf(url) === index);
+
+      const proposalTopicId = curTask.input.metadata?.topicId as string | undefined;
+      if (proposalTopicId && proposalApprovedUrls.length > 0) {
+        projectActions.updateDesignSession({
+          approvedAssetIds: mergeUniqueStrings(
+            useProjectStore.getState().designSession.approvedAssetIds || [],
+            proposalApprovedUrls,
+            12,
+          ),
+          subjectAnchors: mergeUniqueStrings(
+            useProjectStore.getState().designSession.subjectAnchors || [],
+            proposalApprovedUrls,
+            8,
+          ),
+          referenceSummary: summarizeReferenceSet(proposalApprovedUrls),
+        });
+
+        for (const url of proposalApprovedUrls.slice(0, 4)) {
+          await rememberApprovedAsset(proposalTopicId, {
+            url,
+            role: 'result',
+            summary: summarizeReferenceSet([url]),
+            decision: `方案执行结果已采用: ${proposal.title}`,
+          });
+        }
+      }
+
       setCurrentTask(result);
     } catch (error) {
       console.error('Agent Pipeline Failure', { stage: 'executeProposal', error });
@@ -568,19 +744,6 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
         });
       }
       return;
-    } finally {
-      const cur = useAgentStore.getState().currentTask;
-      if (cur && (cur.status === 'analyzing' || cur.status === 'executing')) {
-        setCurrentTask({
-          ...cur,
-          status: 'failed',
-          output: {
-            ...(cur.output || {}),
-            message: '抱歉，生成过程中遇到网络或解析错误，请重试。'
-          },
-          updatedAt: Date.now()
-        });
-      }
     }
   }, [projectContext, addAssetsToCanvas]);
 

@@ -227,9 +227,13 @@ export abstract class EnhancedBaseAgent {
 
     // 有附件时默认绑定首张参考图，确保不会空跑
     if (attachments && attachments.length > 0) {
+      const attachmentRefs = attachments.map((_, index) => `ATTACHMENT_${index}`);
+      forcedCall.params.referenceImages = attachmentRefs;
       forcedCall.params.referenceImage = "ATTACHMENT_0";
       forcedCall.params.reference_image_url = "ATTACHMENT_0";
       forcedCall.params.init_image = "ATTACHMENT_0";
+      forcedCall.params.referencePriority = attachmentRefs.length > 1 ? "all" : "first";
+      forcedCall.params.referenceMode = "product";
     }
 
     return forcedCall;
@@ -329,7 +333,10 @@ export abstract class EnhancedBaseAgent {
       };
 
       if (attachments && attachments.length > 0) {
+        params.referenceImages = attachments.map((_, attachmentIndex) => `ATTACHMENT_${attachmentIndex}`);
         params.referenceImage = "ATTACHMENT_0";
+        params.referencePriority = attachments.length > 1 ? "all" : "first";
+        params.referenceMode = "product";
       }
 
       return {
@@ -1132,6 +1139,10 @@ export abstract class EnhancedBaseAgent {
 
       const multimodalRefUrls =
         metadata?.multimodalContext?.referenceImageUrls || [];
+      const multimodalReferenceSummary =
+        typeof metadata?.multimodalContext?.referenceSummary === 'string'
+          ? metadata.multimodalContext.referenceSummary.trim()
+          : '';
       const multimodalSection =
         multimodalRefUrls.length > 0
           ? `
@@ -1139,7 +1150,9 @@ export abstract class EnhancedBaseAgent {
 ${multimodalRefUrls
             .map((url: string, index: number) => `- REF_URL_${index}: ${url}`)
             .join("\n")}
+- 参考摘要: ${multimodalReferenceSummary || '请将这些参考图视为同一主体的多角度/多细节锚点。'}
 - 当你构造 generateImage 参数时，优先把参考图填入 reference_image_url（也可同步填入 init_image）。
+- 多张参考图必须优先写入 referenceImages，只有单张参考时才仅使用 referenceImage。
 - 若使用 ATTACHMENT_N，也请同时保证 referenceImage 字段存在。`
           : "";
 
@@ -1150,6 +1163,18 @@ ${multimodalRefUrls
 ${metadata.topicPinnedContext}
 `
           : "";
+
+      const designSession = context.designSession;
+      const designSessionSection = designSession
+        ? `
+【统一设计会话（必须继承）】
+- 当前任务模式: ${designSession.taskMode}
+- 已批准资产: ${(designSession.approvedAssetIds || []).slice(-4).join(', ') || '无'}
+- 主体锚点: ${(designSession.subjectAnchors || []).slice(-4).join(', ') || '无'}
+- 参考摘要: ${designSession.referenceSummary || '无'}
+- 禁止变更: ${(designSession.forbiddenChanges || []).join('；') || '无'}
+`
+        : "";
 
       const fullPrompt = `${this.systemPrompt}
 
@@ -1193,12 +1218,12 @@ ${(context.conversationHistory || [])
 可用技能: ${this.preferredSkills.join(", ")}
 ${smartEditSection}
 用户请求: ${message}
-${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${multimodalSection}${topicPinnedContext}
+${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${multimodalSection}${topicPinnedContext}${designSessionSection}
 请分析用户需求，默认返回可直接执行的 JSON（不要让用户二次点击确认）:
 {
   "analysis": "用中文简要分析用户需求",
   "preGenerationMessage": "调用工具前的设计师沟通文案，需复述参考图内容并说明风格与构图策略",
-  "skillCalls": [{"skillName": "generateImage", "params": {"prompt": "...", "referenceImage": "ATTACHMENT_0", "aspectRatio": "1:1", "model": "Nano Banana Pro"}}],
+  "skillCalls": [{"skillName": "generateImage", "params": {"prompt": "...", "referenceImages": ["ATTACHMENT_0", "ATTACHMENT_1"], "referenceImage": "ATTACHMENT_0", "aspectRatio": "1:1", "model": "Nano Banana Pro"}}],
   "message": "用中文回复用户",
   "postGenerationSummary": "工具执行后的简短设计复盘，描述灯光/色调/构图亮点",
   "suggestions": ["可选：如果需要用户提供更多信息或选择项，可在此提供1-4个建议短语供用户快速点击，例如'温馨日常故事'"]
@@ -1554,10 +1579,20 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
             call.params.referenceStrength = 0.75;
           }
           if (!call.params.referencePriority) {
-            call.params.referencePriority = "first";
+            call.params.referencePriority = task.input.context.designSession?.subjectAnchors?.length && task.input.context.designSession.subjectAnchors.length > 1
+              ? "all"
+              : "first";
           }
           if (!call.params.referenceMode) {
             call.params.referenceMode = "product";
+          }
+          if (!call.params.consistencyContext) {
+            call.params.consistencyContext = {
+              approvedAssetIds: task.input.context.designSession?.approvedAssetIds || [],
+              subjectAnchors: task.input.context.designSession?.subjectAnchors || [],
+              referenceSummary: task.input.context.designSession?.referenceSummary,
+              forbiddenChanges: task.input.context.designSession?.forbiddenChanges || [],
+            };
           }
         }
 

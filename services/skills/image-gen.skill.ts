@@ -18,6 +18,14 @@ export async function imageGenSkill(params: ImageGenSkillParams): Promise<string
     enhancedPrompt += `, style: ${params.brandContext.style}`;
   }
 
+  if (params.consistencyContext?.referenceSummary) {
+    enhancedPrompt += `\n\nConsistency anchor: ${params.consistencyContext.referenceSummary}`;
+  }
+
+  if (params.consistencyContext?.forbiddenChanges?.length) {
+    enhancedPrompt += `\nDo not change: ${params.consistencyContext.forbiddenChanges.join(', ')}`;
+  }
+
   return generateImageWithProvider(
     {
       prompt: enhancedPrompt,

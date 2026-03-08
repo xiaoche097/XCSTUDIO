@@ -2,6 +2,37 @@
 export type ImageModel = string;
 export type VideoModel = string;
 
+export type DesignTaskMode =
+  | 'generate'
+  | 'edit'
+  | 'touch-edit'
+  | 'text-edit'
+  | 'layout-edit'
+  | 'research'
+  | 'clarify'
+  | 'respond'
+  | 'workflow-step';
+
+export interface BrandInfo {
+  name?: string;
+  colors?: string[];
+  fonts?: string[];
+  style?: string;
+}
+
+export interface DesignSessionState {
+  taskMode: DesignTaskMode;
+  brand: BrandInfo;
+  styleHints: string[];
+  subjectAnchors: string[];
+  referenceSummary?: string;
+  constraints: string[];
+  forbiddenChanges: string[];
+  approvedAssetIds: string[];
+  researchSummary?: string;
+  referenceWebPages?: Array<{ title: string; url: string }>;
+}
+
 export type ShapeType = 'square' | 'circle' | 'triangle' | 'star' | 'bubble' | 'arrow-left' | 'arrow-right';
 
 export interface CanvasElement {
@@ -182,12 +213,8 @@ export interface ProjectContext {
   projectId: string;
   projectTitle: string;
   conversationId: string;
-  brandInfo?: {
-    name?: string;
-    colors?: string[];
-    fonts?: string[];
-    style?: string;
-  };
+  brandInfo?: BrandInfo;
+  designSession?: DesignSessionState;
   existingAssets: CanvasElement[];
   conversationHistory: ChatMessage[];
 }

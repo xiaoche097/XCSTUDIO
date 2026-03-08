@@ -25,14 +25,11 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
-    // define block restored to support legacy process.env usage
     define: {
-      "process.env": {
-        API_KEY: geminiKey,
-        GEMINI_API_KEY: geminiKey,
-        VITE_GEMINI_API_KEY: geminiKey,
-        NODE_ENV: mode,
-      },
+      "process.env.API_KEY": JSON.stringify(geminiKey),
+      "process.env.GEMINI_API_KEY": JSON.stringify(geminiKey),
+      "process.env.VITE_GEMINI_API_KEY": JSON.stringify(geminiKey),
+      "process.env.NODE_ENV": JSON.stringify(mode),
     },
     resolve: {
       alias: {
