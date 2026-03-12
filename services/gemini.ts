@@ -1194,46 +1194,44 @@ const buildConstrainedPrompt = (
     const hard = opts.strength >= 0.7;
     const referenceCount = Math.max(0, opts.referenceCount || 0);
     const multiReference = referenceCount > 1;
-    const constraints = opts.mode === 'product'
-        ? `
+    let constraints = '';
+    
+    if (opts.mode === 'product') {
+        constraints = `
 [Consistency Iron-Rules]
 - ABSOLUTELY LOCK the product's silhouette, structure, materials, and fine details.
 - DO NOT drift or add extra elements (stitching, logos, textures) not present in the reference.
 - ZERO TOLERANCE for background or lighting changes unless explicitly requested.
 - PIXEL-LEVEL CONSISTENCY: All non-edited regions MUST be a bit-for-bit duplicate of the reference.
-`
-        : opts.mode === 'portrait'
-            ? `
+`;
+    } else if (opts.mode === 'portrait') {
+        constraints = `
 [Portrait Identity Iron-Rules]
 - ABSOLUTELY LOCK the person's identity: facial structure, eye shape, nose, mouth, skin tone, and age.
 - NO MORPHING: The person in the output must be the EXACT SAME individual as the reference.
 - SELECTIVE MODIFICATION: ONLY change the specific attribute requested (e.g., hair, clothes).
 - BACKGROUND LOCK: Keep the original background, lighting, and camera perspective unchanged.
-`
-            : `
-[Universal Consistency Iron-Rules]
-- PRESERVE all visual elements from the reference.
-- ONLY modify what the user explicitly mentioned.
-- KEEP background, lighting, and global composition 100% matched with the reference.
-`
-            : opts.mode === 'product-swap'
-                ? `
+`;
+    } else if (opts.mode === 'product-swap') {
+        constraints = `
 [Product Swap Iron-Rules]
 - IMAGE 1 IS THE "REFERENCE SCENE" (The Blueprint):
-  * ABSOLUTELY LOCK the person's identity, facial features, skin tone, hairstyle, and body pose.
-  * ABSOLUTELY LOCK the background, current lighting physics, and camera angle.
-  * DO NOT introduce any features from the product pool into the human model themselves.
-- IMAGE 2+ ARE THE "PRODUCT POOL" (The Target):
-  * Treat these as the physical items to be placed INTO the scene from Image 1.
-  * Extract material fidelity, stitching detail, and structural cuts from these images.
-- SEAMLESS INTEGRATION: The only change allowed is the product being swapped and its natural interaction with the scene (shadows/creases).
-`
-                : `
+  * STRICTLY FORBIDDEN to change the person's identity, facial features, skin tone, hairstyle, or body pose.
+  * BIT-IDENTICAL BACKGROUND: The background, lighting physics, and camera angle must be a bit-for-bit match with Image 1.
+  * DO NOT introduce any features (face, skin, style) from the product pool into the human model themselves.
+- IMAGE 2+ ARE THE "PRODUCT POOL" (The Items):
+  * Treat these as pure product references to be placed INTO the scene from Image 1.
+  * Extract ultra-high fidelity material texture, stitching, and technical construction.
+- SEAMLESS INTEGRATION: The only localized change allowed is the product swap. Ensure the new item interacts naturally with the scene's lighting and model's body contours.
+`;
+    } else {
+        constraints = `
 [Universal Consistency Iron-Rules]
 - PRESERVE all visual elements from the reference.
 - ONLY modify what the user explicitly mentioned.
 - KEEP background, lighting, and global composition 100% matched with the reference.
-` ;
+`;
+    }
 
     const referenceInstructions = multiReference
         ? `

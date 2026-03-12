@@ -310,8 +310,8 @@ type ToolType =
   | "brush"
   | "eraser";
 
-const PROXY_TRIGGER_PIXELS = 8_000_000;
-const DEFAULT_PROXY_MAX_DIM = 2560;
+const PROXY_TRIGGER_PIXELS = 2_000_000;
+const DEFAULT_PROXY_MAX_DIM = 2048;
 const IMAGE_FIT_VIEWPORT_RATIO = 0.6;
 const IMAGE_FIT_MAX_WIDTH = 1280;
 const IMAGE_FIT_MAX_HEIGHT = 900;
@@ -4088,6 +4088,7 @@ const Workspace: React.FC = () => {
                     ? "2K"
                     : "4K",
               referenceImages: allImages,
+              referenceMode: "product-swap",
               consistencyContext: getDesignConsistencyContext(),
             }),
         );
@@ -4559,35 +4560,50 @@ const Workspace: React.FC = () => {
         e.preventDefault();
         const file = e.clipboardData.files[0];
         if (file.type.startsWith("image/")) {
-          const reader = new FileReader();
-          reader.onload = (event) => {
-            const result = event.target?.result as string;
-            const img = new Image();
-            img.onload = () => {
-              const containerW =
-                window.innerWidth - (showAssistantRef.current ? 480 : 0);
-              const containerH = window.innerHeight;
+          void (async () => {
+            try {
+              const viewport = getCanvasViewportSize(showAssistantRef.current);
+              const {
+                originalUrl,
+                displayUrl,
+                originalWidth,
+                originalHeight,
+                displayWidth,
+                displayHeight,
+              } = await makeImageProxyDataUrl(
+                file,
+                DEFAULT_PROXY_MAX_DIM,
+                viewport,
+              );
+
+              const containerW = viewport.width;
+              const containerH = viewport.height;
               const centerX =
                 (containerW / 2 - panRef.current.x) / (zoomRef.current / 100);
               const centerY =
                 (containerH / 2 - panRef.current.y) / (zoomRef.current / 100);
+
               const newElement: CanvasElement = {
                 id: Date.now().toString(),
                 type: "image",
-                url: result,
-                x: centerX - img.width / 2,
-                y: centerY - img.height / 2,
-                width: img.width,
-                height: img.height,
+                url: displayUrl,
+                originalUrl,
+                proxyUrl: displayUrl !== originalUrl ? displayUrl : undefined,
+                x: centerX - displayWidth / 2,
+                y: centerY - displayHeight / 2,
+                width: displayWidth,
+                height: displayHeight,
                 zIndex: elementsRef.current.length + 1,
+                genAspectRatio: `${originalWidth}:${originalHeight}`,
               };
               const newElements = [...elementsRef.current, newElement];
               setElementsSynced(newElements);
               saveToHistory(newElements, markersRef.current);
-            };
-            img.src = result;
-          };
-          reader.readAsDataURL(file);
+            } catch (err) {
+              console.error("Paste image proxy failed:", err);
+              // Fallback if needed
+            }
+          })();
         }
       }
     };

@@ -77,7 +77,8 @@
     "Tmall",
     "tmall",
     "Lookbook",
-    "lookbook"
+    "lookbook",
+    "inpainting"
   ],
   "ignorePaths": ["node_modules", "dist", "public"]
 }
