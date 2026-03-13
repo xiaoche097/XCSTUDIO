@@ -1144,12 +1144,12 @@ export abstract class EnhancedBaseAgent {
       const productSection =
         hasAttachments && !["cameron"].includes(this.agentInfo.id)
           ? `
-【产品识别 - 最高优先级】
-- 如果用户附带了图片（附件），这些图片就是用户的产品/素材。你必须仔细观察每张图片，识别出产品的具体类型、颜色、材质、形状、品牌元素等细节。
-- 在每个 generateImage 的 prompt 中，必须以产品的精确英文描述开头（例如 "A matte black stainless steel water bottle with bamboo lid and minimalist logo" 而不是 "a water bottle"）。
-- 所有生成的图片必须围绕这些具体产品，不能生成无关的随机产品。
-- 重要：如果用户上传了多张图片并要求生成，你必须为每一张图片独立创建一个 proposal，并在 params 中设置 "referenceImage": "ATTACHMENT_N"。严禁在多图场景下只参考第一张图。
-- 每个 generateImage 的 prompt 必须以产品的精确英文描述开头。
+【产品与素材识别 - 最高优先级】
+- 图片分析是执行画图的前提。你必须先细致观察图片（附件或 URL），识别产品类型、颜色、材质、形状、品牌元素等。
+- 重要：如果用户上传了标记点（Canvas Marker），该附件是对应参考图（URL）标有序号的局部放大/切片。它们是同一事物的不同视角，不要将其计为两件独立产品。
+- 你必须在 analysis 字段中首先展示你的分析发现，然后在 message 字段中复述这些发现，给用户一种你已经“看懂了”的信任感。
+- 在每个 generateImage 的 prompt 中，必须以产品的精确英文描述开头。
+- 如果用户上传多张图，为每张图创建独立 proposal，但在参数中正确关联 referenceImage。
 `
           : "";
 
@@ -1267,14 +1267,19 @@ ${compactConversationHistory || '无'}
 ${smartEditSection}
 用户请求: ${message}
 ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${multimodalSection}${topicPinnedContext}${designSessionSection}
-请分析用户需求，默认返回可直接执行的 JSON（不要让用户二次点击确认）:
+请分析用户需求，严格遵守“先分析、再计划、最后执行”的逻辑：
+1. analysis: 用中文深度分析图片内容、用户隐含的设计意图及构图策略。
+2. message: 【核心】首先用一句话复述你从图里“看见了什么”，再说明你准备怎么做。例如：“我看见您提供了一张孙权角色的写实照片，正在为您以此为基础生成动感的漫展风格插画...”。
+3. skillCalls: 具体的工具调用参数。
+4. suggestions: 给用户的下一步建议。
+
 {
-  "analysis": "用中文简要分析用户需求",
-  "preGenerationMessage": "调用工具前的设计师沟通文案，需复述参考图内容并说明风格与构图策略",
+  "analysis": "...",
+  "preGenerationMessage": "调用工具前的设计师沟通文案",
   "skillCalls": [{"skillName": "generateImage", "params": {"prompt": "...", "referenceImages": ["ATTACHMENT_0", "ATTACHMENT_1"], "referenceImage": "ATTACHMENT_0", "aspectRatio": "1:1", "model": "Nano Banana Pro"}}],
-  "message": "用中文回复用户",
-  "postGenerationSummary": "工具执行后的简短设计复盘，描述灯光/色调/构图亮点",
-  "suggestions": ["可选：如果需要用户提供更多信息或选择项，可在此提供1-4个建议短语供用户快速点击，例如'温馨日常故事'"]
+  "message": "...",
+  "postGenerationSummary": "...",
+  "suggestions": ["..."]
 }
 仅当用户明确要求“先看方案/给几个方案再选”时，才返回 proposals 字段。`;
 
@@ -1283,6 +1288,29 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
 
       // Build content parts - text + image attachments for visual understanding
       const parts: any[] = [{ text: sanitizedPrompt }];
+      
+      // [XC-STUDIO] Inject image attachments as inlineData parts for multimodal analysis
+      if (attachments && attachments.length > 0) {
+        attachments.slice(0, 10).forEach(file => { // Limit to 10 images to prevent payload too large
+          const fileAny = file as any;
+          if (fileAny.url && (fileAny.url.startsWith('data:image/') || fileAny.url.includes(';base64,'))) {
+            try {
+              const base64Content = fileAny.url.split(';base64,')[1];
+              const mimeType = fileAny.url.split(';base64,')[0].replace('data:', '');
+              if (base64Content && mimeType) {
+                parts.push({
+                  inlineData: {
+                    data: base64Content,
+                    mimeType: mimeType
+                  }
+                });
+              }
+            } catch (e) {
+              console.warn('[analyzeAndPlan] Failed to process attachment for multimodal', e);
+            }
+          }
+        });
+      }
 
       const selectedMode = useAgentStore.getState().modelMode || 'fast';
       const bestModel = getBestModelId(selectedMode === 'thinking' ? "thinking" : "text");
@@ -1293,8 +1321,9 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
         historyUsed: Math.min((context.conversationHistory || []).length, MAX_ANALYZE_HISTORY_MESSAGES),
         attachmentCount: attachments?.length || 0,
         uploadedAttachmentCount: uploadedAttachments?.length || 0,
-        includesInlineImages: false,
-        estimatedPayloadChars: JSON.stringify({ prompt: sanitizedPrompt }).length,
+        includesInlineImages: parts.length > 1,
+        partsCount: parts.length,
+        estimatedPayloadChars: JSON.stringify(parts).length,
         model: bestModel,
       };
       console.log(`[${this.agentInfo.id}] [analyzeAndPlan] payload diagnostics`, payloadDiagnostics);

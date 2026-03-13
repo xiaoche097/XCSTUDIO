@@ -231,6 +231,10 @@ const ASPECT_RATIOS = [
   { label: "2:3", value: "2:3", size: "896*1344", width: 896, height: 1344 },
   { label: "5:4", value: "5:4", size: "1280*1024", width: 1280, height: 1024 },
   { label: "4:5", value: "4:5", size: "1024*1280", width: 1024, height: 1280 },
+  { label: "1:4", value: "1:4", size: "512*2048", width: 512, height: 2048 },
+  { label: "4:1", value: "4:1", size: "2048*512", width: 2048, height: 512 },
+  { label: "1:8", value: "1:8", size: "256*2048", width: 256, height: 2048 },
+  { label: "8:1", value: "8:1", size: "2048*256", width: 2048, height: 256 },
 ];
 
 const renderRatioIcon = (ratioStr: string, isActive: boolean = false) => {
@@ -7323,16 +7327,16 @@ const Workspace: React.FC = () => {
                 </button>
                 {showResPicker && (
                   <div className="absolute bottom-full mb-2 right-0 w-28 bg-white rounded-xl shadow-xl border border-gray-100 p-1 z-[60]">
-                    {["1K", "2K", "4K"].map((r) => (
+                    {(el.genModel === 'NanoBanana2' ? ["0.5K", "1K", "2K", "4K"] : ["1K", "2K", "4K"]).map((r) => (
                       <button
                         key={r}
                         onClick={() => {
                           updateSelectedElement({
-                            genResolution: r as "1K" | "2K" | "4K",
+                            genResolution: r as any,
                           });
                           setShowResPicker(false);
                         }}
-                        className={`w-full text-left px-3 py-2 hover:bg-gray-50 rounded-lg text-xs transition ${el.genResolution === r ? "text-blue-600 font-bold bg-blue-50/30" : "text-gray-600"}`}
+                        className={`w-full text-left px-3 py-2 hover:bg-gray-50 rounded-lg text-xs transition ${(el.genResolution || '1K') === r ? "text-blue-600 font-bold bg-blue-50/30" : "text-gray-600"}`}
                       >
                         {r}
                       </button>
@@ -7359,8 +7363,13 @@ const Workspace: React.FC = () => {
                     <div className="px-2 py-1.5 text-[10px] uppercase font-bold text-gray-400 tracking-wider mb-1">
                       格式
                     </div>
-                    {ASPECT_RATIOS.map((r) => {
-                      const isActive = el.genAspectRatio === r.value;
+                    {ASPECT_RATIOS.filter(r => {
+                      if (['1:4', '4:1', '1:8', '8:1'].includes(r.value)) {
+                        return el.genModel === 'NanoBanana2';
+                      }
+                      return true;
+                    }).map((r) => {
+                      const isActive = (el.genAspectRatio || '1:1') === r.value;
                       return (
                         <button
                           key={r.value}

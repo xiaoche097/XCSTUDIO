@@ -42,11 +42,26 @@ export function sanitizeObject<T>(obj: T, maxStringLen: number = 1024): T {
 
 /**
  * 专门针对长字符串的粗暴 Base64 正则清洗（防漏防御）
+ * 修复：使用正则处理超长字符串可能导致 Maximum call stack size exceeded
  */
 export function sanitizeStringBase64(str: string): string {
-    if (!str || str.length < 50000) return str; // 性能优化：只有极大文本才动用正则
-    // 粗略匹配大块 base64 数据并替换
-    return str.replace(/data:image\/[a-zA-Z]*;base64,[A-Za-z0-9+/=]{1000,}/g, '[BASE64_IMAGE_STRIPPED]');
+    if (!str || str.length < 50000) return str; 
+    
+    // 采用更安全的手动切分方式，避免深层正则递归
+    if (str.includes('data:image/') && str.includes(';base64,')) {
+        const parts = str.split(/(data:image\/[a-zA-Z]*;base64,)/);
+        return parts.map(part => {
+            if (part.startsWith('data:image/') && part.endsWith(';base64,')) {
+                return part; // 保留前缀用于定位，但随后会截断内容
+            }
+            // 如果上一个部分是前缀，且当前部分很长，则截断
+            if (part.length > 1000 && /^[A-Za-z0-9+/=]+$/.test(part.slice(0, 100))) {
+                return `[BASE64_IMAGE_STRIPPED_SIZE_${part.length}]`;
+            }
+            return part;
+        }).join('');
+    }
+    return str;
 }
 
 /**

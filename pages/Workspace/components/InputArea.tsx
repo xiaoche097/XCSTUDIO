@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -950,7 +950,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                     <div className="absolute bottom-full left-0 mb-3 w-[260px] bg-white rounded-[24px] shadow-[0_20px_50px_-12px_rgba(0,0,0,0.15)] border border-gray-100 p-5 z-[70] animate-in fade-in slide-in-from-bottom-2 duration-300">
                                         <div className="text-[11px] text-gray-400 font-bold uppercase tracking-widest mb-4">分辨率</div>
                                         <div className="flex gap-2 mb-6">
-                                            {['1K', '2K', '4K'].map(res => (
+                                            {(preferredImageModel === 'NanoBanana2' ? ['0.5K', '1K', '2K', '4K'] : ['1K', '2K', '4K']).map(res => (
                                                 <button key={res} onClick={() => setImageGenRes(res)} className={`flex-1 py-1.5 text-[12px] font-bold rounded-xl transition-all ${imageGenRes === res ? 'bg-gray-200 text-black shadow-inner' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'}`}>
                                                     {res}
                                                 </button>
@@ -961,7 +961,10 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                             {[
                                                 { r: '21:9', i: 'w-5 h-2' }, { r: '16:9', i: 'w-5 h-3' }, { r: '4:3', i: 'w-5 h-3.5' }, { r: '3:2', i: 'w-5 h-3.5' },
                                                 { r: '1:1', i: 'w-4 h-4' }, { r: '9:16', i: 'w-3 h-5' }, { r: '3:4', i: 'w-3.5 h-5' }, { r: '2:3', i: 'w-3.5 h-5' },
-                                                { r: '5:4', i: 'w-4.5 h-4' }, { r: '4:5', i: 'w-4 h-4.5' }
+                                                { r: '5:4', i: 'w-4.5 h-4' }, { r: '4:5', i: 'w-4 h-4.5' },
+                                                ...(preferredImageModel === 'NanoBanana2' ? [
+                                                    { r: '1:4', i: 'w-2 h-6' }, { r: '4:1', i: 'w-6 h-2' }, { r: '1:8', i: 'w-1.5 h-7' }, { r: '8:1', i: 'w-7 h-1.5' }
+                                                ] : [])
                                             ].map(item => (
                                                 <button
                                                     key={item.r}

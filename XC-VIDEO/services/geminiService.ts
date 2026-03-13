@@ -419,7 +419,8 @@ export const generateImageFromText = async (
 
     let size = options.resolution || '1k';
     let apiSize = '1024x1024';
-    if (size === '1k') apiSize = '1024x1024';
+    if (size === '0.5k') apiSize = '512x512';
+    else if (size === '1k') apiSize = '1024x1024';
     else if (size === '2k') apiSize = '2048x2048';
     else if (size === '4k') apiSize = '4096x4096';
 
@@ -429,12 +430,21 @@ export const generateImageFromText = async (
         const mimeType = base64.match(/^data:(image\/[a-zA-Z+]+);base64,/)?.[1] || "image/png";
         parts.push({ inlineData: { data: cleanBase64, mimeType } });
     }
-    parts.push({ text: prompt + ` (resolution: ${apiSize})` });
+
+    // 显式在提示词中强调比例
+    const aspectRatioHint = options.aspectRatio ? ` (aspect_ratio: ${options.aspectRatio})` : "";
+    parts.push({ text: prompt + ` (resolution: ${apiSize})${aspectRatioHint}` });
 
     try {
+        const genConfig: any = {};
+        if (effectiveModel.includes('imagen') && options.aspectRatio) {
+            genConfig.aspectRatio = options.aspectRatio;
+        }
+
         const response = await ai.models.generateContent({
             model: effectiveModel,
-            contents: { parts }
+            contents: { parts },
+            config: genConfig
         });
         const images: string[] = [];
         if (response.candidates?.[0]?.content?.parts) {

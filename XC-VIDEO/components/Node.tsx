@@ -44,7 +44,7 @@ interface NodeProps {
 
 const IMAGE_ASPECT_RATIOS = ['1:1', '3:4', '4:3', '9:16', '16:9'];
 const VIDEO_ASPECT_RATIOS = ['1:1', '3:4', '4:3', '9:16', '16:9'];
-const IMAGE_RESOLUTIONS = ['1k', '2k', '4k'];
+const IMAGE_RESOLUTIONS = ['0.5k', '1k', '2k', '4k'];
 const VIDEO_RESOLUTIONS = ['720p', '1080p', '4k'];
 const IMAGE_COUNTS = [1, 2, 3, 4];
 const VIDEO_COUNTS = [1, 2, 3, 4];
@@ -86,6 +86,11 @@ const MODEL_CONFIGS: Record<string, any> = {
         ratios: ['1:1', '4:3', '3:4', '16:9', '9:16', '21:9'],
         resolutions: ['720p', '1080p'],
         durations: [10]
+    },
+    'NanoBanana2': {
+        ratios: ['1:1', '4:3', '3:4', '16:9', '9:16', '21:9', '3:2', '2:3', '5:4', '4:5', '1:4', '4:1', '1:8', '8:1'],
+        resolutions: ['0.5k', '1k', '2k', '4k'],
+        imageCounts: [1, 2, 3, 4]
     }
 };
 
@@ -630,7 +635,7 @@ const NodeComponent: React.FC<NodeProps> = ({
             models = [{ l: 'Voice Factory (Gemini 2.0)', v: 'gemini-2.5-flash-preview-tts' }];
         } else {
             models = [
-                { l: 'Nnaobanana2 (3.1 Flash Image)', v: 'Nnaobanana2' },
+                { l: 'Nano Banana 2 (3.1 Flash Image)', v: 'NanoBanana2' },
                 { l: 'Gemini 2.5', v: 'gemini-2.5-flash-image' },
                 { l: 'Gemini 3 Pro', v: 'gemini-3-pro-image-preview' }
             ];

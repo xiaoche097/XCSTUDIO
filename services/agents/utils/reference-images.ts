@@ -39,10 +39,19 @@ export function collectReferenceCandidates(
   const uploaded = input.uploadedAttachments || [];
   uploaded.forEach(pushCandidate);
 
-  (input.metadata?.multimodalContext?.referenceImageUrls || []).forEach(pushCandidate);
+  const multimodalUrls = input.metadata?.multimodalContext?.referenceImageUrls || [];
+  multimodalUrls.forEach(pushCandidate);
 
+  // 如果没有公网 URL，或者强制优先附件，则添加附件
   if (!preferHostedUrls || uploaded.length === 0) {
     (input.attachments || []).forEach((file, index) => {
+      // [XC-STUDIO] 修正：如果该附件带有 markerInfo 且其 parentUrl 已经在 seen 中，则跳过计件
+      // 这里的 logic 是为了防止 1+1=2 的认知错误
+      const fileAny = file as any;
+      if (fileAny?.markerInfo?.parentUrl && seen.has(fileAny.markerInfo.parentUrl)) {
+        return; 
+      }
+
       if (file?.type && file.type.startsWith('image/')) {
         pushCandidate(`ATTACHMENT_${index}`);
       }

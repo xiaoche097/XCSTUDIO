@@ -441,8 +441,7 @@ const getVideoBaseUrl = () => {
     return (baseUrl || 'https://generativelanguage.googleapis.com').replace(/\/+$/, '');
 };
 
-// Models
-const PRO_MODEL = 'gemini-3-pro-preview';
+const PRO_MODEL = 'gemini-3.1-pro-preview';
 const FLASH_MODEL = 'gemini-3.1-flash-lite-preview';
 const THINKING_MODEL = 'gemini-3.1-pro-preview';
 // Image Gen models
@@ -1148,7 +1147,7 @@ export interface ImageGenerationConfig {
     prompt: string;
     model: 'Nano Banana Pro' | 'NanoBanana2' | 'Seedream5.0' | 'GPT Image 1.5' | 'Flux.2 Max';
     aspectRatio: string;
-    imageSize?: '1K' | '2K' | '4K';
+    imageSize?: '0.5K' | '1K' | '2K' | '4K';
     referenceImage?: string; // base64 (legacy)
     referenceImages?: string[]; // Multiple base64 images
     maskImage?: string; // Binary mask for inpainting
@@ -1397,12 +1396,18 @@ const generateImageDallE3 = async (
     const baseUrl = normalizeUrl(getApiUrl() || 'https://yunwu.ai');
     const apiKey = requireApiKey('generateImageDallE3');
 
-    // 将宽高比转换为 dall-e-3 支持的尺寸
+    // 将宽高比转换为 Nano Banana Pro / DALL-E 3 支持的精确尺寸 (基于用户截图)
     let size = '1024x1024';
-    if (aspectRatio === '16:9') size = '1792x1024';
-    else if (aspectRatio === '9:16') size = '1024x1792';
-    else if (aspectRatio === '4:3') size = '1024x768';
-    else if (aspectRatio === '3:4') size = '768x1024';
+    if (aspectRatio === '1:1') size = '1024x1024';
+    else if (aspectRatio === '16:9') size = '1456x816';
+    else if (aspectRatio === '9:16') size = '816x1456';
+    else if (aspectRatio === '4:3') size = '1232x928';
+    else if (aspectRatio === '3:4') size = '928x1232';
+    else if (aspectRatio === '21:9') size = '1568x672';
+    else if (aspectRatio === '3:2') size = '1344x896';
+    else if (aspectRatio === '2:3') size = '896x1344';
+    else if (aspectRatio === '5:4') size = '1280x1024';
+    else if (aspectRatio === '4:5') size = '1024x1280';
 
     console.log(`[generateImageDallE3] model=${model}, size=${size}`);
 
@@ -1501,18 +1506,20 @@ export const generateImage = async (config: ImageGenerationConfig): Promise<stri
 
     let validAspectRatio = config.aspectRatio;
 
-    // Expand supported ratios for proxy-based models (Yunwu, etc.)
+    // Expand supported ratios for proxy-based models (Yunwu Nano Banana Pro / 2, etc.)
     const supported = isProxy
-        ? ["1:1", "3:4", "4:3", "9:16", "16:9", "21:9", "3:2", "2:3", "5:4", "4:5"]
+        ? ["1:1", "3:4", "4:3", "9:16", "16:9", "21:9", "3:2", "2:3", "5:4", "4:5", "1:4", "4:1", "1:8", "8:1"]
         : ["1:1", "3:4", "4:3", "9:16", "16:9"];
 
     if (!supported.includes(validAspectRatio)) {
-        if (validAspectRatio === '21:9') validAspectRatio = '16:9';
-        else if (validAspectRatio === '3:2') validAspectRatio = '16:9';
-        else if (validAspectRatio === '2:3') validAspectRatio = '9:16';
-        else if (validAspectRatio === '5:4') validAspectRatio = '4:3';
-        else if (validAspectRatio === '4:5') validAspectRatio = '3:4';
-        else validAspectRatio = '1:1';
+        // 仅在完全不匹配时才执行降级回退
+        if (validAspectRatio === '21:9' && !isProxy) validAspectRatio = '16:9';
+        else if (validAspectRatio === '3:2' && !isProxy) validAspectRatio = '16:9';
+        else if (validAspectRatio === '2:3' && !isProxy) validAspectRatio = '9:16';
+        else if (validAspectRatio === '5:4' && !isProxy) validAspectRatio = '4:3';
+        else if (validAspectRatio === '4:5' && !isProxy) validAspectRatio = '3:4';
+        else if (['1:4', '4:1', '1:8', '8:1'].includes(validAspectRatio) && !isProxy) validAspectRatio = '1:1';
+        else if (!supported.includes(validAspectRatio)) validAspectRatio = '1:1';
     }
 
     // Prepare parts: Image(s) should generally come before or alongside text for multimodal models

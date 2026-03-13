@@ -194,11 +194,18 @@ export const processSceneDirector = async (
         }
     }
 
+    // 收集所有关联的图片作为参考图，以增强一致性
+    const referenceImages: string[] = [];
+    inputs.forEach(n => {
+        if (n.data.croppedFrame) referenceImages.push(n.data.croppedFrame);
+        else if (n.data.image) referenceImages.push(n.data.image);
+    });
+
     return {
         finalPrompt,
         videoInput: null, // Veo uses Image-to-Video mode
         inputImageForGeneration, // This is now the RESTORED High-Res Image
-        referenceImages: undefined,
+        referenceImages: referenceImages.length > 0 ? referenceImages : undefined,
         generationMode: 'CUT'
     };
 };
