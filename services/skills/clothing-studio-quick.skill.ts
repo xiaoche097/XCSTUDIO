@@ -204,29 +204,34 @@ export async function clothingStudioQuickSkill(raw: unknown): Promise<ClothingSt
 
     onProgress?.(`正在生成第 ${i + 1}/${shotList.length} 张：${shot.label}`);
 
-    const prompt = `You are a high-end e-commerce fashion photographer.
+    const prompt = `You are a senior e-commerce studio photographer.
 
-Use reference[0] as the ONLY MODEL identity anchor sheet (same person across all outputs).
-Use reference[1] as the ONLY PRODUCT anchor (garment facts only).
+[Reference Policy]
+- reference[0] = MODEL IDENTITY ANCHOR SHEET. The model must be the EXACT same person across ALL outputs.
+- reference[1] = PRODUCT ANCHOR. Use it ONLY to lock garment facts (construction/material/color). Do NOT copy its lighting/aesthetics.
 
-CRITICAL:
-- SAME FACE: The model must be the exact same individual as reference[0].
-- SAME GARMENT: The garment must match reference[1] exactly (structure, material, color).
+[Identity Lock - MUST]
+- Same face (bone structure, eyes, nose, lips), same hairstyle, same skin tone, same body proportions as reference[0].
+- Natural skin texture. No plastic skin, no beauty filter, no AI glow.
 
-CAMERA & LIGHTING:
-- Photorealistic catalog studio, 85mm lens, f/8, ISO100, strobe lighting.
-
-BACKGROUND:
-- ${backgroundText}
-
-SHOT:
-- ${shot.shotSpec}
-
-PRODUCT CONSISTENCY ANCHOR:
-- ${analysis.anchorDescription || 'Keep garment construction, color, and material unchanged.'}
+[Product Lock - MUST]
+- Reproduce the garment construction EXACTLY.
+- Keep fabric texture, thickness, stretch behavior, sheen level, and color tone consistent.
+- No invented elements, no random patterns, no text/logos.
+- Anchor: ${analysis.anchorDescription || 'Keep garment construction, color, and material unchanged.'}
 - Forbidden changes: ${(analysis.forbiddenChanges || []).join('; ') || 'Do not alter design, color, or material.'}
 
-AVOID:
+[Camera & Lighting]
+- Photorealistic catalog studio, 85mm lens, f/8, ISO100, strobe lighting.
+- Clean high-end retouching but keep fabric texture.
+
+[Background]
+- ${backgroundText}
+
+[Shot Spec]
+- ${shot.shotSpec}
+
+[Avoid]
 ${NEGATIVE_PROMPT}
 `;
 

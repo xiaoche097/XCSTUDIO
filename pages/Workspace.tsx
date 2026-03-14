@@ -2752,19 +2752,29 @@ const Workspace: React.FC = () => {
           return;
         }
 
-        const hostProvider = useImageHostStore.getState().selectedProvider;
-        if (hostProvider === "none") {
-          throw new Error("请先在设置中启用图床（如 ImgBB），再上传产品图");
-        }
+        // Like Cameron storyboard flow: keep everything local as data URLs.
+        // Avoids image hosting dependencies and reduces "stuck" states.
+        const fileToDataUrl = (file: File): Promise<string> =>
+          new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => {
+              if (typeof reader.result === 'string' && reader.result.startsWith('data:image/')) {
+                resolve(reader.result);
+              } else {
+                reject(new Error('图片读取失败：不支持的文件类型'));
+              }
+            };
+            reader.onerror = () => reject(new Error('图片读取失败：FileReader error'));
+            reader.readAsDataURL(file);
+          });
 
-        // Upload all provided images as product pool.
-        updateProgress(`正在上传产品图（${attachments.length} 张）...`);
-        const uploadedUrls: string[] = [];
+        updateProgress(`正在读取产品图（${attachments.length} 张）...`);
+        const productDataUrls: string[] = [];
         for (let i = 0; i < attachments.length; i += 1) {
           const file = attachments[i];
-          updateProgress(`正在上传产品图 ${i + 1}/${attachments.length}：${file.name || 'image'}`);
-          const url = await withTimeout(uploadImage(file), 60000, '图片上传超时');
-          uploadedUrls.push(url);
+          updateProgress(`正在读取产品图 ${i + 1}/${attachments.length}：${file.name || 'image'}`);
+          const dataUrl = await withTimeout(fileToDataUrl(file), 30000, '读取图片超时');
+          productDataUrls.push(dataUrl);
         }
 
         const countMatch = text.match(/(\d+)\s*[张幅]|(?:count|imgs?|images?)\s*[:=]\s*(\d+)/i);
@@ -2783,7 +2793,7 @@ const Workspace: React.FC = () => {
 
         updateProgress('开始生成：锁定产品一致性 + 自动生成同一模特锚点...');
         const result = await executeSkill("clothingStudioQuick", {
-          productImages: uploadedUrls.slice(0, 6),
+          productImages: productDataUrls.slice(0, 6),
           brief: text,
           platform,
           background,
