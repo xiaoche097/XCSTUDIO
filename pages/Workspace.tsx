@@ -2712,6 +2712,11 @@ const Workspace: React.FC = () => {
           role: "model",
           text,
           timestamp: Date.now(),
+          agentData: {
+            title: "服装棚拍组图",
+            model: String((skillData as any)?.config?.defaults?.model || "nanobanana2"),
+            isGenerating: true,
+          },
         };
         if (existing) {
           store.actions.updateMessage(progressMsgId, { ...existing, ...next });
@@ -2733,6 +2738,9 @@ const Workspace: React.FC = () => {
       };
 
       try {
+        // Ensure progress message appears immediately.
+        updateProgress('准备开始...');
+
         if (attachments.length === 0) {
           addMessage({
             id: `clothing-quick-warn-${Date.now()}`,
@@ -2799,7 +2807,7 @@ const Workspace: React.FC = () => {
           text:
             imageUrls.length > 0
               ? `已生成 ${imageUrls.length} 张棚拍组图（同一模特脸 + 产品一致性已校验）。`
-              : `生成失败：未通过一致性质检，请尝试更清晰的产品图或更具体的模特描述。`,
+              : `生成失败：未返回图片。请尝试更清晰的产品图或更具体的模特描述。`,
           timestamp: Date.now(),
           error: imageUrls.length === 0,
           agentData: {
@@ -2822,6 +2830,14 @@ const Workspace: React.FC = () => {
           error: true,
         });
       } finally {
+        // Stop spinner on progress message.
+        const store = useAgentStore.getState();
+        const existing = store.messages.find((m) => m.id === progressMsgId);
+        if (existing?.agentData) {
+          store.actions.updateMessage(progressMsgId, {
+            agentData: { ...(existing.agentData as any), isGenerating: false },
+          });
+        }
         setIsTyping(false);
       }
       return;

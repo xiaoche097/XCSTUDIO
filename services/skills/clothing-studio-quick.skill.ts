@@ -4,7 +4,9 @@ import { imageGenSkill } from './image-gen.skill';
 import { analyzeClothingProductSkill } from './analyze-clothing-product.skill';
 import { generateModelSkill } from './generate-model.skill';
 import { ensureWhiteBackground } from '../image-postprocess';
-import { validateModelIdentity, validateProductConsistency } from '../validators';
+// NOTE: No post-generation QC loops here.
+// We rely on strong reference anchoring (model anchor sheet + product anchor)
+// to keep costs predictable and avoid repeated charged validations.
 import { loadTopicSnapshot, saveTopicAsset, syncClothingTopicMemory } from '../topic-memory';
 
 type Platform = 'amazon' | 'taobao' | 'tmall' | 'unknown';
@@ -130,7 +132,6 @@ export type ClothingStudioQuickResult = {
   images: Array<{ url: string; label?: string }>;
   modelAnchorSheetUrl: string;
   analysis?: any;
-  failedItems?: Array<{ index: number; label?: string; reasons?: string[] }>;
 };
 
 export async function clothingStudioQuickSkill(raw: unknown): Promise<ClothingStudioQuickResult> {
@@ -197,7 +198,6 @@ export async function clothingStudioQuickSkill(raw: unknown): Promise<ClothingSt
   const shotList = Array.from({ length: count }).map((_, i) => baseShots[i % baseShots.length]);
 
   const images: Array<{ url: string; label?: string }> = [];
-  const failedItems: Array<{ index: number; label?: string; reasons?: string[] }> = [];
 
   for (let i = 0; i < shotList.length; i += 1) {
     const shot = shotList[i];
@@ -230,56 +230,28 @@ AVOID:
 ${NEGATIVE_PROMPT}
 `;
 
-    let finalUrl: string | null = null;
-    let lastReasons: string[] = [];
-    let attemptPrompt = prompt;
+    const rawUrl = await imageGenSkill({
+      prompt,
+      model: preferredModel,
+      aspectRatio,
+      imageSize: clarity,
+      referenceImages: [modelAnchorSheetUrl, productAnchorUrl, ...productImages].filter(Boolean),
+      referencePriority: 'all',
+      referenceStrength: 0.9,
+      referenceMode: 'product-swap',
+    } as any);
 
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      const rawUrl = await imageGenSkill({
-        prompt: attemptPrompt,
-        model: preferredModel,
-        aspectRatio,
-        imageSize: clarity,
-        referenceImages: [modelAnchorSheetUrl, productAnchorUrl, ...productImages].filter(Boolean),
-        referencePriority: 'all',
-        referenceStrength: 0.85,
-      } as any);
-
-      if (!rawUrl) continue;
-      const whiteBgUrl = await ensureWhiteBackground(rawUrl);
-
-      const identityCheck = await validateModelIdentity(modelAnchorSheetUrl, whiteBgUrl);
-      const productCheck = await validateProductConsistency(
-        productAnchorUrl,
-        whiteBgUrl,
-        analysis.anchorDescription || '保持服装结构与颜色一致',
-        analysis.forbiddenChanges || ['不要改变版型和颜色'],
-      );
-
-      if (identityCheck.pass && productCheck.pass) {
-        finalUrl = whiteBgUrl;
-        break;
-      }
-
-      lastReasons = [...identityCheck.reasons, ...productCheck.reasons].filter(Boolean);
-      const fixes = [identityCheck.suggestedFix, productCheck.suggestedFix]
-        .filter(Boolean)
-        .join('; ');
-      attemptPrompt = `${attemptPrompt}\n\nFix consistency issues: ${fixes}`;
-      onProgress?.(`一致性质检未通过，正在修正并重试（${attempt + 1}/3）...`);
+    if (!rawUrl) {
+      continue;
     }
 
-    if (!finalUrl) {
-      failedItems.push({ index: i, label: shot.label, reasons: lastReasons });
-    } else {
-      images.push({ url: finalUrl, label: shot.label });
-    }
+    const finalUrl = await ensureWhiteBackground(rawUrl);
+    images.push({ url: finalUrl, label: shot.label });
   }
 
   return {
     images,
     modelAnchorSheetUrl,
     analysis: { platform, productType: analysis.productType },
-    failedItems: failedItems.length ? failedItems : undefined,
   };
 }
