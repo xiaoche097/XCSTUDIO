@@ -2796,7 +2796,8 @@ const Workspace: React.FC = () => {
         updateProgress('开始生成棚拍组图（先生成模特锚点，再出图）...');
 
         const countMatch = text.match(/(\d+)\s*[张幅]|(?:count|imgs?|images?)\s*[:=]\s*(\d+)/i);
-        const requestedCount = countMatch ? Number(countMatch[1] || countMatch[2]) : undefined;
+        const requestedCountRaw = countMatch ? Number(countMatch[1] || countMatch[2]) : NaN;
+        const requestedCount = Number.isFinite(requestedCountRaw) && requestedCountRaw > 0 ? requestedCountRaw : undefined;
 
         const platform = /亚马逊|amazon/i.test(text)
           ? "amazon"
@@ -2814,7 +2815,7 @@ const Workspace: React.FC = () => {
           brief: text,
           platform,
           background,
-          count: requestedCount,
+          count: requestedCount ?? (skillData as any)?.config?.defaults?.count ?? 3,
           aspectRatio: (skillData as any)?.config?.defaults?.aspectRatio || "3:4",
           clarity: "2K",
           preferredImageModel: (skillData as any)?.config?.defaults?.model || "nanobanana2",

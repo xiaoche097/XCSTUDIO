@@ -147,7 +147,7 @@ export async function clothingStudioQuickSkill(raw: unknown): Promise<ClothingSt
   const productImages = params.productImages.slice(0, 6);
   const brief = String(params.brief || '').trim();
   const platform = normalizePlatform(params.platform);
-  const count = Math.max(1, Math.min(10, Number(params.count || 3)));
+  const count = Math.max(1, Math.min(10, Number(params.count ?? 3)));
   const aspectRatio = String(params.aspectRatio || '3:4');
   const clarity = (params.clarity || '2K') as '1K' | '2K' | '4K';
   const preferredModel = (params.preferredImageModel || 'nanobanana2') as ImageModel;
