@@ -731,7 +731,7 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                 const isLastTextBlock = textBlocks[textBlocks.length - 1]?.id === block.id;
                                 const hasText = (block.text || '').trim().length > 0;
                                 const placeholder = isLastTextBlock && textBlocks.length <= 1 && pendingAttachments.length === 0
-                                    ? (creationMode === 'agent' ? "请输入你的设计需求" : "今天我们要创作什么")
+                                    ? (creationMode === 'agent' ? "请输入你的设计需求" : creationMode === 'chat' ? "聊聊灵感、方向、文案、风格..." : "今天我们要创作什么")
                                     : "";
 
                                 return (

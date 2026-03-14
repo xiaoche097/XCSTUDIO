@@ -408,19 +408,19 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                             <button
                                 onClick={() => {
                                     handleSend(
-                                        buildQuickSkillPrompt('请帮我进行服装棚拍组图设计'),
+                                        buildQuickSkillPrompt('请基于参考图开始分镜故事板创作'),
                                         undefined,
                                         webEnabled,
                                         {
-                                            id: 'clothing-studio-quick',
-                                            name: '服装棚拍组图',
-                                            iconName: 'Shirt',
+                                            id: 'cameron',
+                                            name: '分镜故事板',
+                                            iconName: 'Film',
                                             config: {
                                                 twoStep: true,
                                                 defaults: {
                                                     aspectRatio: '3:4',
                                                     count: 3,
-                                                    model: 'nanobanana2',
+                                                    model: 'gemini-3-pro-preview',
                                                 },
                                             },
                                         }

@@ -3,7 +3,7 @@ import { devtools } from 'zustand/middleware';
 import { immer } from 'zustand/middleware/immer';
 
 type ToolType = 'select' | 'hand' | 'mark';
-type CreationMode = 'agent' | 'image' | 'video';
+type CreationMode = 'agent' | 'chat' | 'image' | 'video';
 
 interface UIState {
   // 工具和模式

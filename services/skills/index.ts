@@ -7,12 +7,10 @@ import { smartEditSkill } from './smart-edit.skill';
 import { exportSkill } from './export.skill';
 import { touchEditSkill } from './touch-edit.skill';
 import { runXcAiOneclick, formatXcaiOneclickResult } from './xcai-oneclick.skill';
-import { clothingStudioWorkflowSkill } from './clothing-studio-workflow.skill';
-import { clothingStudioQuickSkill } from './clothing-studio-quick.skill';
 import { generateModelSkill } from './generate-model.skill';
 import { analyzeClothingProductSkill } from './analyze-clothing-product.skill';
 
-export { imageGenSkill, videoGenSkill, textExtractSkill, regionAnalyzeSkill, copyGenSkill, smartEditSkill, exportSkill, touchEditSkill, runXcAiOneclick, clothingStudioWorkflowSkill, clothingStudioQuickSkill, generateModelSkill, analyzeClothingProductSkill };
+export { imageGenSkill, videoGenSkill, textExtractSkill, regionAnalyzeSkill, copyGenSkill, smartEditSkill, exportSkill, touchEditSkill, runXcAiOneclick, generateModelSkill, analyzeClothingProductSkill };
 
 export const AVAILABLE_SKILLS = {
   generateImage: imageGenSkill,
@@ -24,8 +22,6 @@ export const AVAILABLE_SKILLS = {
   export: exportSkill,
   touchEdit: touchEditSkill,
   xcaiOneclick: runXcAiOneclick,
-  clothingStudioWorkflow: clothingStudioWorkflowSkill,
-  clothingStudioQuick: clothingStudioQuickSkill,
   generateModel: generateModelSkill,
   analyzeClothingProduct: analyzeClothingProductSkill,
 };
