@@ -39,12 +39,15 @@ export function collectReferenceCandidates(
   const uploaded = input.uploadedAttachments || [];
   uploaded.forEach(pushCandidate);
 
-  const multimodalUrls = input.metadata?.multimodalContext?.referenceImageUrls || [];
-  multimodalUrls.forEach(pushCandidate);
-
-  // 如果没有公网 URL，或者强制优先附件，则添加附件
-  if (!preferHostedUrls || uploaded.length === 0) {
-    (input.attachments || []).forEach((file, index) => {
+  // NOTE:
+  // If hosted URLs exist we still want to keep ATTACHMENT_* as a fallback.
+  // Some hosts return URLs that are not fetchable in-browser due to CORS/403,
+  // while base64 attachments remain usable.
+  // To avoid pushing references over the limit, keep only the first couple of
+  // image attachments as fallback when uploaded URLs exist.
+  const maxAttachmentFallback = preferHostedUrls && uploaded.length > 0 ? 2 : Number.POSITIVE_INFINITY;
+  let attachmentFallbackCount = 0;
+  (input.attachments || []).forEach((file, index) => {
       // [XC-STUDIO] 修正：如果该附件带有 markerInfo 且其 parentUrl 已经在 seen 中，则跳过计件
       // 这里的 logic 是为了防止 1+1=2 的认知错误
       const fileAny = file as any;
@@ -53,10 +56,15 @@ export function collectReferenceCandidates(
       }
 
       if (file?.type && file.type.startsWith('image/')) {
+        if (attachmentFallbackCount >= maxAttachmentFallback) return;
         pushCandidate(`ATTACHMENT_${index}`);
+        attachmentFallbackCount += 1;
       }
-    });
-  }
+
+  });
+
+  const multimodalUrls = input.metadata?.multimodalContext?.referenceImageUrls || [];
+  multimodalUrls.forEach(pushCandidate);
 
   return {
     limitedCandidates: candidates.slice(0, maxReferenceImages),

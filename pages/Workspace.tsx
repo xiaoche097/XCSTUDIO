@@ -2555,7 +2555,7 @@ const Workspace: React.FC = () => {
     } catch (e) {
       console.error("Smart gen failed", e);
       setElements((prev) =>
-        prev.map((el) => (el.id === id ? { ...el, isGenerating: false } : e)),
+        prev.map((el) => (el.id === id ? { ...el, isGenerating: false } : el)),
       );
     }
   };
@@ -2674,20 +2674,28 @@ const Workspace: React.FC = () => {
       try {
         setIsTyping(true);
         const topicId = ensureTopicId();
-        if (topicId && text?.trim()) {
-          const hints = extractConstraintHints(text);
-          if (hints.length > 0) {
-            await upsertTopicSnapshot(topicId, {
-              pinned: {
-                constraints: hints,
-                decisions: [],
-              },
-            });
+        if (topicId) {
+          // 合并 overridePrompt 与用户输入
+          const combinedText = text?.trim() 
+            ? `${skillData.name}: ${text.trim()}`
+            : skillData.name;
+          
+          if (text?.trim()) {
+            const hints = extractConstraintHints(text);
+            if (hints.length > 0) {
+              await upsertTopicSnapshot(topicId, {
+                pinned: {
+                  constraints: hints,
+                  decisions: [],
+                },
+              });
+            }
           }
+          
           await addTopicMemoryItem({
             topicId,
             type: "instruction",
-            text: text.trim(),
+            text: combinedText,
           });
         }
 
@@ -8158,16 +8166,7 @@ const Workspace: React.FC = () => {
               )}
             </div>
 
-            {/* 橡皮工具 */}
-            <button
-              onClick={() => setEraserMode(true)}
-              className={`w-full flex items-center gap-2.5 px-2 py-1.5 text-gray-600 hover:bg-gray-50 rounded-[10px] transition-colors ${toolbarExpanded ? "" : "justify-center"}`}
-            >
-              <Eraser size={16} strokeWidth={2} className="flex-shrink-0" />
-              {toolbarExpanded && (
-                <span className="text-[13px] whitespace-nowrap">橡皮工具</span>
-              )}
-            </button>
+
 
             {/* 编辑元素 */}
             <button
@@ -8365,16 +8364,7 @@ const Workspace: React.FC = () => {
             </div>
             放大
           </button>
-          <button className="px-2.5 py-1.5 text-gray-600 hover:text-black hover:bg-gray-50 rounded-lg flex items-center gap-2 text-[13px] font-medium transition-colors group">
-            <div className="relative">
-              <Eraser
-                size={14}
-                className="opacity-70 group-hover:opacity-100 transition-opacity"
-              />
-              <div className="absolute -bottom-0.5 -right-0.5 w-1.5 h-1.5 bg-white border border-gray-600 rounded-full"></div>
-            </div>
-            移除背景
-          </button>
+
           <div className="w-px h-4 bg-gray-200 mx-1"></div>
           <a
             href={el.url}

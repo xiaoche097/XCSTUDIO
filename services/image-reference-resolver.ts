@@ -82,11 +82,22 @@ export const normalizeReferenceToDataUrl = async (input: string): Promise<string
   if (!input || typeof input !== 'string') return null;
   if (/^data:image\/.+;base64,/.test(input)) return input;
 
+  // Debug: make it obvious when we silently drop references.
+  // Keep logs lightweight; do not print full data URLs.
+  const logPrefix = '[reference-resolver]';
+  const safePreview = (value: string) => {
+    const v = String(value || '').trim();
+    if (!v) return '';
+    if (v.startsWith('data:image/')) return `data:image/...(${v.length} chars)`;
+    return v.length > 160 ? `${v.slice(0, 160)}...` : v;
+  };
+
   const selectedProvider = useImageHostStore.getState().selectedProvider;
   const preferHostedUrls = selectedProvider !== 'none';
 
   if (/^blob:/i.test(input)) {
     try {
+      console.log(`${logPrefix} resolving blob reference:`, safePreview(input));
       const res = await fetchWithResilience(
         input,
         {},
@@ -97,11 +108,13 @@ export const normalizeReferenceToDataUrl = async (input: string): Promise<string
       if (!blob.type.startsWith('image/')) return null;
       return await blobToDataUrl(blob);
     } catch {
+      console.warn(`${logPrefix} blob reference failed, dropping:`, safePreview(input));
       return null;
     }
   }
 
   if (/^https?:\/\//i.test(input)) {
+    console.log(`${logPrefix} resolving url reference:`, safePreview(input));
     if (preferHostedUrls && /(^https?:\/\/i\.ibb\.co\/)|(^https?:\/\/ibb\.co\/)/i.test(input)) {
       const serverDataUrl = await fetchReferenceViaServer(input);
       if (serverDataUrl) {
@@ -116,6 +129,7 @@ export const normalizeReferenceToDataUrl = async (input: string): Promise<string
         { operation: 'generateImage.resolveReferenceUrl', retries: 1, timeoutMs: 30000 },
       );
       if (!res.ok) {
+        console.warn(`${logPrefix} url fetch not ok (${res.status}), will try fallback:`, safePreview(input));
         if ([401, 403, 404, 408, 429, 500, 502, 503, 504].includes(res.status)) {
           const serverDataUrl = await fetchReferenceViaServer(input);
           if (serverDataUrl) return serverDataUrl;
@@ -136,7 +150,7 @@ export const normalizeReferenceToDataUrl = async (input: string): Promise<string
         return serverDataUrl;
       }
 
-      console.warn('[reference-resolver] All attempts to fetch reference image failed, continuing without it:', input);
+      console.warn(`${logPrefix} All attempts failed, continuing without reference:`, safePreview(input));
       return null;
     }
   }

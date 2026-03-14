@@ -143,6 +143,17 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
   ): Promise<AgentTask | null> => {
     if (!message.trim()) return null;
 
+    // Normalize metadata flags used across layers.
+    // Workspace uses `forceToolCall` (e.g. marker edits) while agents gate execution via `forceSkills`.
+    // Keep them aligned to avoid "should force" paths diverging.
+    const normalizedMetadata: Record<string, any> = { ...(metadata || {}) };
+    if (normalizedMetadata.forceToolCall === true && normalizedMetadata.forceSkills !== true) {
+      normalizedMetadata.forceSkills = true;
+    }
+    if (normalizedMetadata.forceGenerateImage === true && normalizedMetadata.forceSkills !== true) {
+      normalizedMetadata.forceSkills = true;
+    }
+
     if (isProcessingRef.current) {
       messageQueue.current.push({ message, attachments, metadata, userMessageId });
       console.log('[useAgentOrchestrator] Message queued, queue size:', messageQueue.current.length);
@@ -236,14 +247,14 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
 
       const activeConversationId = String(projectContext.conversationId || '').trim();
       const topicId = String(
-        (metadata as any)?.topicId ||
+        (normalizedMetadata as any)?.topicId ||
         (activeConversationId ? getMemoryKey(projectContext.projectId, activeConversationId) : '') ||
         ''
       ).trim();
       let topicPinnedContext = '';
       let topicPinnedRefs: string[] = [];
       const projectActions = useProjectStore.getState().actions;
-      const inferredTaskMode = inferTaskModeFromRequest(message, metadata);
+      const inferredTaskMode = inferTaskModeFromRequest(message, normalizedMetadata);
       projectActions.setTaskMode(inferredTaskMode);
 
       if (topicId) {
@@ -438,37 +449,37 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
         return responseTask;
       }
 
-      const taskMetadata = {
-        ...(metadata || {}),
-        imageHostProvider: hostProvider,
-        topicId,
-        topicPinnedContext,
-        taskMode: inferredTaskMode,
-        originalMessage: message,
-        optimizedMessage: optimizedMessageForTrace,
-        optimizerUsed,
-        optimizerStatus,
-        allReferenceImageUrls: [...uploadedUrls],
-        injectedReferenceImageUrls: [] as string[],
-        multimodalContext: {
-          ...(metadata?.multimodalContext || {}),
-          referenceImageUrls: [
-            ...topicPinnedRefs,
-            ...((metadata?.multimodalContext?.referenceImageUrls as string[]) || []),
-            ...uploadedUrls,
-          ].filter((url, idx, arr) => typeof url === 'string' && !!url && arr.indexOf(url) === idx),
-          hasReferenceImages:
-            topicPinnedRefs.length +
-              (((metadata?.multimodalContext?.referenceImageUrls as string[]) || []).length) +
-              uploadedUrls.length >
-            0,
-          referenceSummary: summarizeReferenceSet([
-            ...topicPinnedRefs,
-            ...((metadata?.multimodalContext?.referenceImageUrls as string[]) || []),
-            ...uploadedUrls,
-          ]),
-        },
-      };
+       const taskMetadata = {
+         ...(normalizedMetadata || {}),
+         imageHostProvider: hostProvider,
+         topicId,
+         topicPinnedContext,
+         taskMode: inferredTaskMode,
+         originalMessage: message,
+         optimizedMessage: optimizedMessageForTrace,
+         optimizerUsed,
+         optimizerStatus,
+         allReferenceImageUrls: [...uploadedUrls],
+         injectedReferenceImageUrls: [] as string[],
+         multimodalContext: {
+           ...(normalizedMetadata?.multimodalContext || {}),
+           referenceImageUrls: [
+             ...topicPinnedRefs,
+             ...((normalizedMetadata?.multimodalContext?.referenceImageUrls as string[]) || []),
+             ...uploadedUrls,
+           ].filter((url, idx, arr) => typeof url === 'string' && !!url && arr.indexOf(url) === idx),
+           hasReferenceImages:
+             topicPinnedRefs.length +
+               (((normalizedMetadata?.multimodalContext?.referenceImageUrls as string[]) || []).length) +
+               uploadedUrls.length >
+             0,
+           referenceSummary: summarizeReferenceSet([
+             ...topicPinnedRefs,
+             ...((normalizedMetadata?.multimodalContext?.referenceImageUrls as string[]) || []),
+             ...uploadedUrls,
+           ]),
+         },
+       };
 
       const existingDesignSession = projectContext.designSession;
       const sessionConstraints = extractConstraintHints(message);
@@ -487,16 +498,16 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
           ...(existingDesignSession?.constraints || []),
           ...sessionConstraints,
         ], [], 20),
-        researchSummary: typeof metadata?.multimodalContext?.research?.reportBrief === 'string'
-          ? metadata.multimodalContext.research.reportBrief
+        researchSummary: typeof normalizedMetadata?.multimodalContext?.research?.reportBrief === 'string'
+          ? normalizedMetadata.multimodalContext.research.reportBrief
           : existingDesignSession?.researchSummary,
-        referenceWebPages: Array.isArray(metadata?.multimodalContext?.referenceWebPages)
-          ? metadata.multimodalContext.referenceWebPages.slice(0, 8)
+        referenceWebPages: Array.isArray(normalizedMetadata?.multimodalContext?.referenceWebPages)
+          ? normalizedMetadata.multimodalContext.referenceWebPages.slice(0, 8)
           : existingDesignSession?.referenceWebPages,
       });
 
       if (topicId) {
-        const researchBrief = metadata?.multimodalContext?.research?.reportBrief;
+        const researchBrief = normalizedMetadata?.multimodalContext?.research?.reportBrief;
         const topicConstraints = mergeUniqueStrings(
           sessionConstraints,
           typeof researchBrief === 'string' && researchBrief ? [researchBrief] : [],
@@ -504,7 +515,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
         );
         const topicDecisions = mergeUniqueStrings(
           existingDesignSession?.styleHints || [],
-          typeof metadata?.creationMode === 'string' ? [metadata.creationMode] : [],
+          typeof normalizedMetadata?.creationMode === 'string' ? [normalizedMetadata.creationMode] : [],
           20,
         );
         await upsertTopicSnapshot(topicId, {

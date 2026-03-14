@@ -243,26 +243,37 @@ export abstract class EnhancedBaseAgent {
     else if (aspectRatio === "3:4") layoutDescriptor = "high-definition 2k portrait photography, 3:4 orientation, ";
     else if (aspectRatio === "1:1") layoutDescriptor = "hi-res 2k square format, 1:1 ratio, ";
 
+    // 智能补强：根据消息内容增加基础材质/品类锚点，防止 AI 产生“分类漂移”
+    let categoryEnhancer = "";
+    if (/(衣服|裤子|裙子|服装|穿穿|试穿|上身|cloth|wear|outfit|dress)/i.test(message)) {
+      categoryEnhancer = "fabric texture details, realistic garment draping, ";
+    } else if (/(盒|包|瓶|罐|package|box|bottle)/i.test(message)) {
+      categoryEnhancer = "packaging structural details, high-end materials, ";
+    } else if (/(耳机|科技|电子|机箱|芯片|tech|gadget|headphone)/i.test(message)) {
+      categoryEnhancer = "precision industrial components, metallic finish, ";
+    }
+
     const forcedCall: any = {
       skillName: "generateImage",
       params: {
-        prompt: `${layoutDescriptor}${message}, high-impact visual design, clean composition, studio lighting, professional 2k digital art, 8k resolution details`,
+        prompt: `${layoutDescriptor}${categoryEnhancer}${message}, high-impact visual design, clean composition, studio lighting, professional 2K digital art, 8K resolution details`,
         aspectRatio,
-        quality: "hd", // 默认高清
-        resolution: "2048x2048", // 默认 2K 级别
+        quality: "hd",
+        resolution: "2048x2048",
         model: "Nano Banana Pro",
       },
     };
 
-    // 有附件时默认绑定首张参考图，确保不会空跑
+    // 有附件时强制锚定【最后一张】附件（通常是用户最新上传的核心主体），防止历史干扰
     if (attachments && attachments.length > 0) {
+      const lastIdx = attachments.length - 1;
       const attachmentRefs = attachments.map((_, index) => `ATTACHMENT_${index}`);
       forcedCall.params.referenceImages = attachmentRefs;
-      forcedCall.params.referenceImage = "ATTACHMENT_0";
-      forcedCall.params.reference_image_url = "ATTACHMENT_0";
-      forcedCall.params.init_image = "ATTACHMENT_0";
-      forcedCall.params.referencePriority = attachmentRefs.length > 1 ? "all" : "first";
-      forcedCall.params.referenceMode = "product";
+      forcedCall.params.referenceImage = `ATTACHMENT_${lastIdx}`;
+      forcedCall.params.reference_image_url = `ATTACHMENT_${lastIdx}`;
+      forcedCall.params.init_image = `ATTACHMENT_${lastIdx}`;
+      forcedCall.params.referencePriority = "first"; // 强制以当前指定的图为主
+      forcedCall.params.referenceMode = categoryEnhancer.includes("fabric") ? "portrait" : "product";
     }
 
     return forcedCall;
@@ -1142,14 +1153,13 @@ export abstract class EnhancedBaseAgent {
         : "";
 
       const productSection =
-        hasAttachments && !["cameron"].includes(this.agentInfo.id)
+        hasAttachments
           ? `
-【产品与素材识别 - 最高优先级】
-- 图片分析是执行画图的前提。你必须先细致观察图片（附件或 URL），识别产品类型、颜色、材质、形状、品牌元素等。
-- 重要：如果用户上传了标记点（Canvas Marker），该附件是对应参考图（URL）标有序号的局部放大/切片。它们是同一事物的不同视角，不要将其计为两件独立产品。
-- 你必须在 analysis 字段中首先展示你的分析发现，然后在 message 字段中复述这些发现，给用户一种你已经“看懂了”的信任感。
-- 在每个 generateImage 的 prompt 中，必须以产品的精确英文描述开头。
-- 如果用户上传多张图，为每张图创建独立 proposal，但在参数中正确关联 referenceImage。
+【主体识别优先协议 - VISION_REFRESH_PROTOCOL v4】
+- **实体属性判定 (Entity Category Pre-check) [CRITICAL]**：在分析材质前，必须首先判定主体是 **真人实体** 还是 **非生物物件**。
+- **人像特权识别**：若主体为人类，必须锁定：性别年龄、五官特征、肤质妆造、体势神态。严禁将其抽象化为“几何体”或“材料”。
+- **物件物理分析**：若主体为非生物，按几何拓扑和材质物理属性进行无偏见描述。
+- **视觉瞬间切换**：若最新附件 ATTACHMENT_0 与历史上下文/话题记忆在实体范畴上冲突（如：过去是音箱，现在是真人），你必须**瞬间重置**所有假设，以当前视觉事实为唯一真理。
 `
           : "";
 
@@ -1192,23 +1202,40 @@ export abstract class EnhancedBaseAgent {
       const multimodalSection =
         multimodalRefUrls.length > 0
           ? `
-【多模态参考图 URL（优先用于 Tool 参数）】
+【多模态参考图 URL（实体冲突隔离）】
 ${multimodalRefUrls
             .map((url: string, index: number) => `- REF_URL_${index}: ${url}`)
             .join("\n")}
-- 参考摘要: ${multimodalReferenceSummary || '请将这些参考图视为同一主体的多角度/多细节锚点。'}
-- 当你构造 generateImage 参数时，优先把参考图填入 reference_image_url（也可同步填入 init_image）。
-- 多张参考图必须优先写入 referenceImages，只有单张参考时才仅使用 referenceImage。
-- 若使用 ATTACHMENT_N，也请同时保证 referenceImage 字段存在。`
+- 参考摘要: ${multimodalReferenceSummary || '请分析当前主体的视觉锚点。'}
+- **实体级冲突重置 (ENTITY_TYPE_RESET)**：如果历史参考图 (REF_URL_X) 与最新附件 (ATTACHMENT_0) 在“人/物”性质上不符，你必须执行 **强制清空** 记忆。绝对禁止将历史物件属性赋予当前人像，或将历史人设赋予当前物件。
+- 当你构造 generateImage 参数时，优先把参考图填入 reference_image_url。
+- 多张参考图必须优先写入 referenceImages。`
           : "";
 
-      const topicPinnedContext =
-        typeof metadata?.topicPinnedContext === "string" && metadata.topicPinnedContext.trim().length > 0
-          ? `
-【话题长期记忆（必须优先遵守）】
-${truncateText(metadata.topicPinnedContext, MAX_TOPIC_CONTEXT_CHARS)}
-`
+      let rawPinnedText = typeof metadata?.topicPinnedContext === "string" && metadata.topicPinnedContext.trim().length > 0
+          ? metadata.topicPinnedContext
           : "";
+      
+      let finalPinnedText = rawPinnedText;
+
+      // 【记忆净化协议 - CONTEXT_SANITIZATION】
+      // 如果当前是真人图且记忆里包含高频“工业/音箱”幻觉词，执行物理隔离
+      const containsHallucinationWords = /圆柱|音箱|磨砂纸|半透明|核心|纳米/i.test(finalPinnedText);
+      const isCurrentlyHuman = (attachments && attachments.length > 0) || /人|模特|女性|男性|脸|五官/i.test(message); 
+      
+      if (isCurrentlyHuman && containsHallucinationWords) {
+        finalPinnedText = `
+【警告：历史环境已污染 - CONTEXT_RESET】
+当前检测到您的视觉输入为真人，但历史话题记忆中包含无关的物件属性（音箱/圆柱体等）。
+你必须**物理隔离 (Omit)** 以下历史背景，严禁将历史材质应用到真人身上。
+已隔离历史背景摘要: ${finalPinnedText.slice(0, 100)}...
+`;
+      }
+
+      const topicPinnedContext = finalPinnedText ? `
+【话题长期记忆（必须优先遵守）】
+${truncateText(finalPinnedText, MAX_TOPIC_CONTEXT_CHARS)}
+` : "";
 
       const designSession = context.designSession;
       const compactConversationHistory = (context.conversationHistory || [])
@@ -1267,9 +1294,9 @@ ${compactConversationHistory || '无'}
 ${smartEditSection}
 用户请求: ${message}
 ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${multimodalSection}${topicPinnedContext}${designSessionSection}
-请分析用户需求，严格遵守“先分析、再计划、最后执行”的逻辑：
-1. analysis: 用中文深度分析图片内容、用户隐含的设计意图及构图策略。
-2. message: 【核心】首先用一句话复述你从图里“看见了什么”，再说明你准备怎么做。例如：“我看见您提供了一张孙权角色的写实照片，正在为您以此为基础生成动感的漫展风格插画...”。
+请分析用户需求，严格遵守“先判定性质、再分析、最后执行”的逻辑：
+1. analysis: 【严禁跳步】必须首先确认主体范畴（真人/物件），再进行细节描述。如果是人像，锁定其生物特征；如果是物品，锁定物理材质。
+2. message: 【核心】用感性设计师口吻复述。例如：“我看见您提供了一张真人图片，是一位[描述特征]的模特，我将为您保留其韵味并设计方案...”
 3. skillCalls: 具体的工具调用参数。
 4. suggestions: 给用户的下一步建议。
 
@@ -1861,6 +1888,22 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
       if (resolved) references.push(resolved);
     }
 
+    if ((import.meta as any).env?.DEV) {
+      const safe = (v: string) => {
+        if (!v) return '';
+        if (v.startsWith('data:image/')) return `data:image/...(${v.length} chars)`;
+        return v.length > 140 ? `${v.slice(0, 140)}...` : v;
+      };
+      console.info(`[${this.agentInfo.id}] reference candidates`, {
+        sourceCount,
+        truncated,
+        max: MAX_REFERENCE_IMAGES,
+        limitedCandidates: limitedCandidates.map(safe),
+        resolvedCount: references.length,
+        resolved: references.map(safe),
+      });
+    }
+
     return {
       references,
       sourceCount,
@@ -1876,16 +1919,13 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
     const selectedProvider = String(task.input.metadata?.imageHostProvider || 'none');
     const preferHostedUrls = selectedProvider !== 'none';
 
+    // If it's already a URL or data URL, pass through.
+    // ATTACHMENT_* should resolve to base64 to remain usable even when hosted URLs
+    // are blocked by CORS/403 in-browser. Hosted URLs are added as separate
+    // candidates upstream.
     if (!value.startsWith("ATTACHMENT_")) return value;
 
     const idx = Number.parseInt(value.split("_")[1] || "", 10);
-    if (preferHostedUrls) {
-      const hostedUrl = task.input.uploadedAttachments?.[idx];
-      if (hostedUrl && /^https?:\/\//i.test(hostedUrl)) {
-        return hostedUrl;
-      }
-    }
-
     const file = task.input.attachments?.[idx];
     if (!file) return null;
 
