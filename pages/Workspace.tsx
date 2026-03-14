@@ -116,6 +116,55 @@ import {
   analyzeProductSwapScene,
 } from "../services/gemini";
 import { validateApprovedAnchorConsistency } from "../services/validators";
+
+// Chat mode persona: prompt optimizer (user-provided).
+// Kept as a plain string so it can be passed into createChatSession() as systemInstruction.
+const PROMPT_OPTIMIZER_SYSTEM_INSTRUCTION = `# Role: 用户提示词精准描述专家
+
+## Profile
+- Author: prompt-optimizer
+- Version: 2.0.0
+- Language: 中文
+- Description: 专门将泛泛而谈、缺乏针对性的用户提示词转换为精准、具体、有针对性的描述
+
+## Background
+- 用户提示词经常过于宽泛、缺乏具体细节
+- 泛泛而谈的提示词难以获得精准的回答
+- 具体、精准的描述能够引导AI提供更有针对性的帮助
+
+## 任务理解
+你的任务是将泛泛而谈的用户提示词转换为精准、具体、有针对性的描述。你不是在执行提示词中的任务，而是在改进提示词的精准度和针对性。
+
+## Skills
+1. 精准化能力
+   - 细节挖掘: 识别需要具体化的抽象概念和泛泛表述
+   - 参数明确: 为模糊的要求添加具体的参数和标准
+   - 范围界定: 明确任务的具体范围和边界
+   - 目标聚焦: 将宽泛的目标细化为具体的可执行任务
+
+2. 描述增强能力
+   - 量化标准: 为抽象要求提供可量化的标准
+   - 示例补充: 添加具体的示例来说明期望
+   - 约束条件: 明确具体的限制条件和要求
+   - 执行指导: 提供具体的操作步骤和方法
+
+## Rules
+1. 保持核心意图: 在具体化的过程中不偏离用户的原始目标
+2. 增加针对性: 让提示词更加有针对性和可操作性
+3. 避免过度具体: 在具体化的同时保持适当的灵活性
+4. 突出重点: 确保关键要求得到精准的表达
+
+## Workflow
+1. 分析原始提示词中的抽象概念和泛泛表述
+2. 识别需要具体化的关键要素和参数
+3. 为每个抽象概念添加具体的定义和要求
+4. 重新组织表达，确保描述精准、有针对性
+
+## Output Requirements
+- 直接输出精准化后的用户提示词文本，确保描述具体、有针对性
+- 输出的是优化后的提示词本身，不是执行提示词对应的任务
+- 不要添加解释、示例或使用说明
+- 不要与用户进行交互或询问更多信息`;
 import {
   ChatMessage,
   Template,
@@ -987,8 +1036,9 @@ const Workspace: React.FC = () => {
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
-  // 创作模式状态: 'agent' | 'image' | 'video'
-  type CreationMode = "agent" | "image" | "video";
+  // 创作模式状态: 'agent' | 'chat' | 'image' | 'video'
+  // chat: pure conversation for inspiration / prompt refinement.
+  type CreationMode = "agent" | "chat" | "image" | "video";
   const [creationMode, setCreationMode] = useState<CreationMode>("agent");
   const [researchMode] = useState<"off" | "images" | "web+images">(
     "web+images",
@@ -2620,6 +2670,159 @@ const Workspace: React.FC = () => {
         .map((b) => b.file!) as File[]);
     const isWeb = overrideWeb ?? webEnabled;
 
+    // Chat mode: pure conversation (inspiration / prompt refinement).
+    // Keeps web search + modelMode + multimodal attachments, but avoids agent routing.
+    if (creationMode === "chat" && !skillData) {
+      const effectiveConversationId = ensureConversationId();
+      const _effectiveTopicId = buildMemoryKey(effectiveConversationId);
+
+      const attachmentPreviews = attachments.map((f) => URL.createObjectURL(f));
+      const attachmentMetadata = attachments.map((f) => ({
+        markerId: (f as any).markerId,
+        markerName: (f as any).markerName,
+        markerInfo: (f as any).markerInfo,
+      }));
+
+      addMessage({
+        id: Date.now().toString(),
+        role: "user",
+        text,
+        attachments: attachmentPreviews,
+        attachmentMetadata,
+        timestamp: Date.now(),
+      } as any);
+
+      setIsTyping(true);
+      setInputBlocks([{ id: "init", type: "text", text: "" }]);
+      document.querySelectorAll('[id^="input-block-"]').forEach((el) => {
+        (el as HTMLElement).textContent = "";
+      });
+
+      const modelName =
+        modelMode === "thinking"
+          ? "gemini-3-pro-preview"
+          : "gemini-3-flash-preview";
+
+      const ensurePromptOptimizerChat = () => {
+        if (!promptOptimizerChatRef.current || promptOptimizerModelRef.current !== modelName) {
+          promptOptimizerChatRef.current = createChatSession(
+            modelName,
+            promptOptimizerHistoryRef.current as any,
+            PROMPT_OPTIMIZER_SYSTEM_INSTRUCTION,
+          );
+          promptOptimizerModelRef.current = modelName;
+        }
+      };
+
+      const fileToImageFrameFiles = async (file: File, frameCount: number): Promise<File[]> => {
+        const url = URL.createObjectURL(file);
+        try {
+          const video = document.createElement("video");
+          video.src = url;
+          video.muted = true;
+          video.playsInline = true as any;
+          video.crossOrigin = "anonymous";
+          await new Promise<void>((resolve, reject) => {
+            video.onloadedmetadata = () => resolve();
+            video.onerror = () => reject(new Error("视频读取失败：无法加载元数据"));
+          });
+
+          const duration = Number.isFinite(video.duration) ? video.duration : 0;
+          const times = duration > 0
+            ? [0.1, 0.5, 0.9].slice(0, Math.max(1, Math.min(3, frameCount))).map((p) => Math.max(0, Math.min(duration - 0.05, duration * p)))
+            : [0];
+
+          const canvas = document.createElement("canvas");
+          const ctx = canvas.getContext("2d");
+          if (!ctx) throw new Error("无法初始化 Canvas 上下文");
+
+          const out: File[] = [];
+          for (let i = 0; i < times.length; i += 1) {
+            const t = times[i];
+            await new Promise<void>((resolve, reject) => {
+              const onSeeked = () => {
+                video.removeEventListener("seeked", onSeeked);
+                resolve();
+              };
+              const onErr = () => {
+                video.removeEventListener("error", onErr);
+                reject(new Error("视频读取失败：seek error"));
+              };
+              video.addEventListener("seeked", onSeeked);
+              video.addEventListener("error", onErr);
+              try {
+                video.currentTime = t;
+              } catch (e) {
+                reject(e as any);
+              }
+            });
+
+            canvas.width = video.videoWidth || 1280;
+            canvas.height = video.videoHeight || 720;
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            const blob = await new Promise<Blob>((resolve, reject) => {
+              canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("视频抽帧失败"))), "image/png", 0.92);
+            });
+            out.push(new File([blob], `${file.name || "video"}-frame-${i + 1}.png`, { type: "image/png" }));
+          }
+          return out;
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      };
+
+      try {
+        ensurePromptOptimizerChat();
+
+        // Convert video attachments to a few image frames for analysis.
+        const sendFiles: File[] = [];
+        const extraNotes: string[] = [];
+        for (const f of attachments) {
+          if (f.type && f.type.startsWith("video/")) {
+            extraNotes.push(`已检测到视频文件：${f.name || "video"}。已自动抽取关键帧用于分析。`);
+            const frames = await fileToImageFrameFiles(f, 3);
+            sendFiles.push(...frames);
+            continue;
+          }
+          sendFiles.push(f);
+        }
+
+        const composedText = extraNotes.length > 0
+          ? `${text}\n\n${extraNotes.join("\n")}`
+          : text;
+
+        const reply = await sendMessage(
+          promptOptimizerChatRef.current as any,
+          composedText,
+          sendFiles,
+          Boolean(isWeb),
+        );
+
+        // Track chat history for model switches.
+        promptOptimizerHistoryRef.current.push({ role: "user", parts: [{ text: composedText }] } as any);
+        promptOptimizerHistoryRef.current.push({ role: "model", parts: [{ text: reply }] } as any);
+
+        addMessage({
+          id: `chat-${Date.now()}`,
+          role: "model",
+          text: reply,
+          timestamp: Date.now(),
+        });
+      } catch (error: any) {
+        addMessage({
+          id: `chat-err-${Date.now()}`,
+          role: "model",
+          text: `对话失败：${error?.message || "未知错误"}`,
+          timestamp: Date.now(),
+          error: true,
+        });
+      } finally {
+        setIsTyping(false);
+      }
+      return;
+    }
+
     const selectedIdsSnapshot =
       selectedElementIds.length > 0
         ? [...selectedElementIds]
@@ -3469,8 +3672,8 @@ const Workspace: React.FC = () => {
           : [];
     const prev = prevSelectedIdsRef.current;
 
-    // 只有 Agent 模式下才执行画布图片自动插入/清除逻辑
-    if (creationMode !== "agent") {
+    // Only allow canvas auto-insert in agent/chat.
+    if (creationMode !== "agent" && creationMode !== "chat") {
       pendingPickRequestRef.current += 1;
       clearPendingAttachments();
       prevSelectedIdsRef.current = ids;
@@ -3570,6 +3773,9 @@ const Workspace: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const refImageInputRef = useRef<HTMLInputElement>(null);
   const chatSessionRef = useRef<any>(null);
+  const promptOptimizerChatRef = useRef<any>(null);
+  const promptOptimizerHistoryRef = useRef<any[]>([]);
+  const promptOptimizerModelRef = useRef<string>("");
   const fontTriggerRef = useRef<HTMLButtonElement>(null);
   const weightTriggerRef = useRef<HTMLButtonElement>(null);
   const textSettingsTriggerRef = useRef<HTMLButtonElement>(null);
@@ -4516,6 +4722,16 @@ const Workspace: React.FC = () => {
       parts: [{ text: m.text }],
     }));
     chatSessionRef.current = createChatSession(modelName, historyContent);
+
+    // Keep prompt-optimizer chat in sync with model mode
+    if (promptOptimizerChatRef.current) {
+      promptOptimizerChatRef.current = createChatSession(
+        modelName,
+        promptOptimizerHistoryRef.current as any,
+        PROMPT_OPTIMIZER_SYSTEM_INSTRUCTION,
+      );
+      promptOptimizerModelRef.current = modelName;
+    }
   }, [modelMode]);
 
   useEffect(() => {
@@ -7188,7 +7404,7 @@ const Workspace: React.FC = () => {
           ReactDOM.createPortal(
             <div
               ref={textSettingsPopoverRef}
-              className="fixed w-52 bg-white/95 rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.2)] border border-gray-100 p-3 z-[9999] backdrop-blur-md animate-in fade-in zoom-in-95 duration-200"
+              className="fixed w-56 bg-white/95 rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.2)] border border-gray-100 p-3 z-[9999] backdrop-blur-md animate-in fade-in zoom-in-95 duration-200"
               style={{ left: textSettingsPos.x, top: textSettingsPos.y }}
               onMouseDown={(e) => e.stopPropagation()}
             >
@@ -7196,9 +7412,7 @@ const Workspace: React.FC = () => {
                 <div className="space-y-2">
                   <div className="flex justify-between items-center text-[11px] font-bold text-gray-400 px-1">
                     <span>LINE HEIGHT</span>
-                    <span className="text-gray-900">
-                      {(el.lineHeight || 1.2).toFixed(1)}
-                    </span>
+                    <span className="text-gray-900">{(el.lineHeight || 1.2).toFixed(1)}</span>
                   </div>
                   <input
                     type="range"
@@ -7208,22 +7422,28 @@ const Workspace: React.FC = () => {
                     value={el.lineHeight || 1.2}
                     onChange={(e) => {
                       const newVal = Number(e.target.value);
-                      const currentText = textEditDraftRef.current[el.id] || el.text || "";
-                      const newWidth = getTextWidth(currentText, el.fontSize, el.fontFamily, el.fontWeight, newVal);
+                      const currentText =
+                        textEditDraftRef.current[el.id] || el.text || "";
+                      const newWidth = getTextWidth(
+                        currentText,
+                        el.fontSize,
+                        el.fontFamily,
+                        el.fontWeight,
+                        newVal,
+                      );
                       updateEl({
                         lineHeight: newVal,
-                        width: newWidth
+                        width: newWidth,
                       });
                     }}
                     className="w-full h-1.5 bg-gray-100 rounded-full appearance-none cursor-pointer accent-gray-900"
                   />
                 </div>
+
                 <div className="space-y-2">
                   <div className="flex justify-between items-center text-[11px] font-bold text-gray-400 px-1">
                     <span>LETTER SPACING</span>
-                    <span className="text-gray-900">
-                      {(el.letterSpacing || 0).toFixed(1)}
-                    </span>
+                    <span className="text-gray-900">{(el.letterSpacing || 0).toFixed(1)}</span>
                   </div>
                   <input
                     type="range"
@@ -7233,11 +7453,18 @@ const Workspace: React.FC = () => {
                     value={el.letterSpacing || 0}
                     onChange={(e) => {
                       const newVal = Number(e.target.value);
-                      const currentText = textEditDraftRef.current[el.id] || el.text || "";
-                      const newWidth = getTextWidth(currentText, el.fontSize, el.fontFamily, el.fontWeight, newVal);
+                      const currentText =
+                        textEditDraftRef.current[el.id] || el.text || "";
+                      const newWidth = getTextWidth(
+                        currentText,
+                        el.fontSize,
+                        el.fontFamily,
+                        el.fontWeight,
+                        el.lineHeight || 1.2,
+                      );
                       updateEl({
                         letterSpacing: newVal,
-                        width: newWidth
+                        width: newWidth,
                       });
                     }}
                     className="w-full h-1.5 bg-gray-100 rounded-full appearance-none cursor-pointer accent-gray-900"

@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
     ChevronDown, Plus, X, ArrowUp, Paperclip, Lightbulb, Zap, Globe, Box, Sparkles,
     Image as ImageIcon, Check, Video, FileText, Banana, ChevronLeft, ChevronRight,
-    Activity, Layers, Cloud, ShieldCheck, Monitor, MapPin
+    Activity, Layers, Cloud, ShieldCheck, Monitor, MapPin, MessageSquare
 } from 'lucide-react';
 import { useAgentStore } from '../../../stores/agent.store';
 import { useCanvasStore } from '../../../stores/canvas.store';
@@ -79,8 +79,8 @@ const setCECursorPos = (el: HTMLElement, pos: number) => {
 };
 
 interface InputAreaProps {
-    creationMode: 'agent' | 'image' | 'video';
-    setCreationMode: (mode: 'agent' | 'image' | 'video') => void;
+    creationMode: 'agent' | 'chat' | 'image' | 'video';
+    setCreationMode: (mode: 'agent' | 'chat' | 'image' | 'video') => void;
     handleSend: (overridePrompt?: string, overrideAttachments?: File[], overrideWeb?: boolean, skillData?: any) => Promise<void>;
     handleModeSwitch: (mode: 'thinking' | 'fast') => void;
     fileInputRef: React.RefObject<HTMLInputElement | null>;
@@ -923,13 +923,15 @@ export const InputArea: React.FC<InputAreaProps> = ({
                                 onClick={() => setShowModeSelector(!showModeSelector)}
                                 className="h-8 px-3.5 rounded-full flex items-center justify-center gap-1.5 text-[13px] font-medium transition-all bg-white border border-blue-200 text-blue-500 hover:bg-blue-50/50 hover:border-blue-300 shadow-sm"
                             >
-                                {creationMode === 'agent' && <><Sparkles size={15} /> Agent</>}
-                                {creationMode === 'image' && <><ImageIcon size={15} /> 图像</>}
-                                {creationMode === 'video' && <><Video size={15} /> 视频</>}
+                                 {creationMode === 'agent' && <><Sparkles size={15} /> Agent</>}
+                                 {creationMode === 'chat' && <><MessageSquare size={15} /> Chat</>}
+                                 {creationMode === 'image' && <><ImageIcon size={15} /> 图像</>}
+                                 {creationMode === 'video' && <><Video size={15} /> 视频</>}
                             </button>
                             {showModeSelector && (
                                 <div className="absolute bottom-full left-0 mb-3 w-[160px] bg-white rounded-2xl shadow-xl border border-gray-100 py-2 z-50 overflow-hidden">
                                     <button onClick={() => { setCreationMode('agent'); setShowModeSelector(false); setIsAgentMode(true); }} className={`w-full px-4 py-2.5 flex items-center justify-between text-sm font-medium hover:bg-gray-50 transition ${creationMode === 'agent' ? 'text-blue-500' : 'text-gray-600'}`}><div className="flex items-center gap-2.5"><Sparkles size={14} className={creationMode === 'agent' ? 'text-blue-500' : 'text-gray-400'} /> Agent</div>{creationMode === 'agent' && <Check size={14} strokeWidth={2.5} />}</button>
+                                    <button onClick={() => { setCreationMode('chat'); setShowModeSelector(false); setIsAgentMode(false); }} className={`w-full px-4 py-2.5 flex items-center justify-between text-sm font-medium hover:bg-gray-50 transition ${creationMode === 'chat' ? 'text-blue-500' : 'text-gray-600'}`}><div className="flex items-center gap-2.5"><MessageSquare size={14} className={creationMode === 'chat' ? 'text-blue-500' : 'text-gray-400'} /> Chat 对话</div>{creationMode === 'chat' && <Check size={14} strokeWidth={2.5} />}</button>
                                     <button onClick={() => { setCreationMode('image'); setShowModeSelector(false); setIsAgentMode(false); }} className={`w-full px-4 py-2.5 flex items-center justify-between text-sm font-medium hover:bg-gray-50 transition ${creationMode === 'image' ? 'text-blue-500' : 'text-gray-600'}`}><div className="flex items-center gap-2.5"><ImageIcon size={14} className={creationMode === 'image' ? 'text-blue-500' : 'text-gray-400'} /> 图像生成器</div>{creationMode === 'image' && <Check size={14} strokeWidth={2.5} />}</button>
                                     <button onClick={() => { setCreationMode('video'); setShowModeSelector(false); setIsAgentMode(false); }} className={`w-full px-4 py-2.5 flex items-center justify-between text-sm font-medium hover:bg-gray-50 transition ${creationMode === 'video' ? 'text-blue-500' : 'text-gray-600'}`}><div className="flex items-center gap-2.5"><Video size={14} className={creationMode === 'video' ? 'text-blue-500' : 'text-gray-400'} /> 视频生成器</div>{creationMode === 'video' && <Check size={14} strokeWidth={2.5} />}</button>
                                 </div>

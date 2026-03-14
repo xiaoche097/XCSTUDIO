@@ -25,8 +25,8 @@ interface AssistantSidebarProps {
     handleSend: (overridePrompt?: string, overrideAttachments?: File[], overrideWeb?: boolean, skillData?: any) => Promise<void>;
     handleSmartGenerate: (prompt: string, proposalId?: string) => void;
     setPreviewUrl: (url: string) => void;
-    creationMode: 'agent' | 'image' | 'video';
-    setCreationMode: (mode: 'agent' | 'image' | 'video') => void;
+    creationMode: 'agent' | 'chat' | 'image' | 'video';
+    setCreationMode: (mode: 'agent' | 'chat' | 'image' | 'video') => void;
     setPrompt: (prompt: string) => void;
     handleModeSwitch: (mode: 'thinking' | 'fast') => void;
     fileInputRef: React.RefObject<HTMLInputElement | null>;
