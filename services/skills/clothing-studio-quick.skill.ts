@@ -5,6 +5,7 @@ import { analyzeClothingProductSkill } from './analyze-clothing-product.skill';
 import { generateModelSkill } from './generate-model.skill';
 import { ensureWhiteBackground } from '../image-postprocess';
 import { validateModelIdentity, validateProductConsistency } from '../validators';
+import { loadTopicSnapshot, saveTopicAsset, syncClothingTopicMemory } from '../topic-memory';
 
 type Platform = 'amazon' | 'taobao' | 'tmall' | 'unknown';
 
@@ -133,6 +134,10 @@ export type ClothingStudioQuickResult = {
 };
 
 export async function clothingStudioQuickSkill(raw: unknown): Promise<ClothingStudioQuickResult> {
+  const onProgress = typeof (raw as any)?.onProgress === 'function'
+    ? ((raw as any).onProgress as (text: string) => void)
+    : undefined;
+
   const params = schema.parse(raw);
 
   const productImages = params.productImages.slice(0, 6);
@@ -143,21 +148,47 @@ export async function clothingStudioQuickSkill(raw: unknown): Promise<ClothingSt
   const clarity = (params.clarity || '2K') as '1K' | '2K' | '4K';
   const preferredModel = (params.preferredImageModel || 'nanobanana2') as ImageModel;
 
+  onProgress?.('正在分析产品图（锁定材质/颜色/结构锚点）...');
   const analysis = await analyzeClothingProductSkill({
     productImages,
     brief,
   });
+  onProgress?.('产品分析完成，准备生成/复用模特锚点...');
 
   const productAnchorUrl = productImages[Math.max(0, Math.min(productImages.length - 1, Number(analysis.productAnchorIndex || 0)))] || productImages[0];
 
+  const topicId = String((raw as any)?.topicId || '').trim() || '';
   let modelAnchorSheetUrl = String(params.sessionModelAnchorSheetUrl || '').trim();
+
+  // Recommended behavior: cache one model anchor per topic/session.
+  if (!modelAnchorSheetUrl && topicId && !params.regenerateModel) {
+    const snap = await loadTopicSnapshot(topicId);
+    const cached = snap?.clothingStudio?.modelAnchorSheetRef?.url;
+    if (cached) {
+      modelAnchorSheetUrl = cached;
+      onProgress?.('已复用本会话的模特锚点（确保同一张脸）');
+    }
+  }
+
   if (!modelAnchorSheetUrl || params.regenerateModel) {
+    onProgress?.('正在生成模特四视图锚点（用于锁脸一致性）...');
     const modelOptions = parseModelOptionsFromBrief(brief);
     const generated = await generateModelSkill({
       options: modelOptions as any,
       preferredImageModel: preferredModel,
     });
     modelAnchorSheetUrl = generated.anchorSheetUrl;
+    onProgress?.('模特锚点生成完成，开始生成棚拍组图...');
+
+    if (topicId) {
+      const ref = await saveTopicAsset(topicId, 'model_anchor_sheet', {
+        url: modelAnchorSheetUrl,
+        mime: 'image/png',
+      });
+      if (ref) {
+        await syncClothingTopicMemory(topicId, { modelAnchorSheetRef: ref });
+      }
+    }
   }
 
   const backgroundText = buildBackgroundText(params.background);
@@ -170,6 +201,8 @@ export async function clothingStudioQuickSkill(raw: unknown): Promise<ClothingSt
 
   for (let i = 0; i < shotList.length; i += 1) {
     const shot = shotList[i];
+
+    onProgress?.(`正在生成第 ${i + 1}/${shotList.length} 张：${shot.label}`);
 
     const prompt = `You are a high-end e-commerce fashion photographer.
 
@@ -233,6 +266,7 @@ ${NEGATIVE_PROMPT}
         .filter(Boolean)
         .join('; ');
       attemptPrompt = `${attemptPrompt}\n\nFix consistency issues: ${fixes}`;
+      onProgress?.(`一致性质检未通过，正在修正并重试（${attempt + 1}/3）...`);
     }
 
     if (!finalUrl) {

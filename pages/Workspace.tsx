@@ -2703,6 +2703,35 @@ const Workspace: React.FC = () => {
         (el as HTMLElement).textContent = "";
       });
 
+      const progressMsgId = `clothing-quick-progress-${Date.now()}`;
+      const updateProgress = (text: string) => {
+        const store = useAgentStore.getState();
+        const existing = store.messages.find((m) => m.id === progressMsgId);
+        const next: ChatMessage = {
+          id: progressMsgId,
+          role: "model",
+          text,
+          timestamp: Date.now(),
+        };
+        if (existing) {
+          store.actions.updateMessage(progressMsgId, { ...existing, ...next });
+        } else {
+          addMessage(next);
+        }
+      };
+
+      const withTimeout = async <T,>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
+        let timeout: any;
+        const timer = new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error(`${label}（超过 ${Math.round(timeoutMs / 1000)}s）`)), timeoutMs);
+        });
+        try {
+          return await Promise.race([promise, timer]);
+        } finally {
+          clearTimeout(timeout);
+        }
+      };
+
       try {
         if (attachments.length === 0) {
           addMessage({
@@ -2721,9 +2750,12 @@ const Workspace: React.FC = () => {
         }
 
         // Upload all provided images as product pool.
+        updateProgress(`正在上传产品图（${attachments.length} 张）...`);
         const uploadedUrls: string[] = [];
-        for (const file of attachments) {
-          const url = await uploadImage(file);
+        for (let i = 0; i < attachments.length; i += 1) {
+          const file = attachments[i];
+          updateProgress(`正在上传产品图 ${i + 1}/${attachments.length}：${file.name || 'image'}`);
+          const url = await withTimeout(uploadImage(file), 60000, '图片上传超时');
           uploadedUrls.push(url);
         }
 
@@ -2741,6 +2773,7 @@ const Workspace: React.FC = () => {
         const bgMatch = text.match(/背景\s*[:：]\s*([^\n]+)/);
         const background = bgMatch ? String(bgMatch[1] || '').trim() : undefined;
 
+        updateProgress('开始生成：锁定产品一致性 + 自动生成同一模特锚点...');
         const result = await executeSkill("clothingStudioQuick", {
           productImages: uploadedUrls.slice(0, 6),
           brief: text,
@@ -2751,8 +2784,9 @@ const Workspace: React.FC = () => {
           clarity: "2K",
           preferredImageModel: (skillData as any)?.config?.defaults?.model || "nanobanana2",
           sessionModelAnchorSheetUrl: undefined,
-          regenerateModel: true,
+          regenerateModel: false,
           topicId: effectiveTopicId,
+          onProgress: (t: string) => updateProgress(String(t || '').trim() || '处理中...'),
         });
 
         const imageUrls = Array.isArray(result?.images)
@@ -2775,7 +2809,11 @@ const Workspace: React.FC = () => {
             isGenerating: false,
           },
         });
+
+        // Mark progress as done.
+        updateProgress('生成完成');
       } catch (err: any) {
+        updateProgress(`失败：${err?.message || '未知错误'}`);
         addMessage({
           id: `clothing-quick-err-${Date.now()}`,
           role: "model",
