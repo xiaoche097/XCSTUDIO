@@ -132,6 +132,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
     };
 
     const STORYBOARD_SKILL = { id: 'cameron', name: '分镜故事板', iconName: 'Film' };
+    const CLOTHING_SKILL = { id: 'clothing-studio', name: '服装棚拍组图', iconName: 'Shirt' };
 
     const buildQuickSkillPrompt = (base: string) => {
         const extra = readCurrentInputText();
@@ -407,20 +408,21 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
                             </button>
                             <button
                                 onClick={() => {
+                                    setActiveQuickSkillSynced(CLOTHING_SKILL);
                                     handleSend(
-                                        buildQuickSkillPrompt('请基于参考图开始分镜故事板创作'),
+                                        buildQuickSkillPrompt('请帮我进行服装棚拍组图设计'),
                                         undefined,
                                         webEnabled,
                                         {
-                                            id: 'cameron',
-                                            name: '分镜故事板',
-                                            iconName: 'Film',
+                                            id: 'clothing-studio',
+                                            name: '服装棚拍组图',
+                                            iconName: 'Shirt',
                                             config: {
                                                 twoStep: true,
                                                 defaults: {
                                                     aspectRatio: '3:4',
                                                     count: 3,
-                                                    model: 'gemini-3-pro-preview',
+                                                    model: 'nanobanana2',
                                                 },
                                             },
                                         }
