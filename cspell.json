@@ -80,7 +80,11 @@
     "lookbook",
     "inpainting",
     "taobao",
-    "oversmooth"
+    "oversmooth",
+    "rehost",
+    "Supabase",
+    "Vercel",
+    "Imgbb"
   ],
   "ignorePaths": ["node_modules", "dist", "public"]
 }
