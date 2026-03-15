@@ -79,27 +79,27 @@ export default function Admin() {
   const metrics: Metric[] = useMemo(
     () => [
       {
-        label: "Active Users",
+        label: "活跃用户",
         value: "—",
-        hint: "MVP: no DB yet",
+        hint: "MVP阶段：尚未接入数据库",
         icon: <Users size={18} className="text-white/70" />,
       },
       {
-        label: "Requests (24h)",
+        label: "请求数 (24h)",
         value: "—",
-        hint: "wire to analytics",
+        hint: "需接入分析系统",
         icon: <Activity size={18} className="text-white/70" />,
       },
       {
-        label: "Success Rate",
+        label: "成功率",
         value: "—",
-        hint: "track per endpoint",
+        hint: "按接口监测",
         icon: <Gauge size={18} className="text-white/70" />,
       },
       {
-        label: "Security",
-        value: "Admin Only",
-        hint: "HttpOnly session",
+        label: "安全性",
+        value: "仅限管理员",
+        hint: "HttpOnly 会话加密",
         icon: <Shield size={18} className="text-white/70" />,
       },
     ],
@@ -112,28 +112,28 @@ export default function Admin() {
       {
         id: "e1",
         type: "auth",
-        title: "Admin session verified",
+        title: "管理员会话已验证",
         meta: "GET /api/auth/me",
         time: fmtTime(now - 2 * 60 * 1000),
       },
       {
         id: "e2",
         type: "search",
-        title: "Research search",
+        title: "调研搜索",
         meta: "POST /api/search",
         time: fmtTime(now - 14 * 60 * 1000),
       },
       {
         id: "e3",
         type: "extract",
-        title: "Web extract",
+        title: "网页提取",
         meta: "POST /api/extract",
         time: fmtTime(now - 22 * 60 * 1000),
       },
       {
         id: "e4",
         type: "rehost",
-        title: "Rehost image",
+        title: "图片转存",
         meta: "POST /api/rehost-image",
         time: fmtTime(now - 39 * 60 * 1000),
       },
@@ -172,9 +172,9 @@ export default function Admin() {
       <div className="min-h-screen bg-[#0A0A0B] text-white flex items-center justify-center">
         <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl p-6">
           <div className="text-[10px] uppercase tracking-[0.28em] text-white/45 font-bold">
-            Admin Console
+            管理控制台
           </div>
-          <div className="mt-2 text-lg font-bold">Checking session…</div>
+          <div className="mt-2 text-lg font-bold">正在验证会话…</div>
           <div className="mt-4 h-2 rounded-full bg-white/10 overflow-hidden">
             <motion.div
               className="h-full w-1/2 bg-white/40"
@@ -204,13 +204,13 @@ export default function Admin() {
             <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/10 bg-white/5">
               <Shield size={14} className="text-cyan-300" />
               <span className="text-[11px] font-semibold tracking-widest uppercase text-white/80">
-                Admin Console
+                管理控制台
               </span>
             </div>
             <h1 className="mt-5 text-3xl lg:text-[44px] leading-tight font-serif font-light tracking-tight">
-              System
+              系统
               <span className="text-transparent bg-clip-text bg-gradient-to-b from-white to-white/60">
-                Overview
+                概览
               </span>
             </h1>
             <p className="mt-3 text-sm text-white/55 max-w-[56ch]">
@@ -225,18 +225,18 @@ export default function Admin() {
                 "h-11 px-4 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 transition flex items-center gap-2",
                 refreshing && "opacity-80",
               )}
-              title="Refresh"
+              title="刷新"
             >
               <RefreshCw size={16} className={cn(refreshing && "animate-spin")} />
-              <span className="text-sm font-semibold">Refresh</span>
+              <span className="text-sm font-semibold">刷新</span>
             </button>
             <button
               onClick={logout}
               className="h-11 px-4 rounded-2xl bg-white text-black hover:shadow-[0_0_26px_rgba(255,255,255,0.22)] transition flex items-center gap-2"
-              title="Logout"
+              title="退出登录"
             >
               <LogOut size={16} />
-              <span className="text-sm font-bold">Logout</span>
+              <span className="text-sm font-bold">退出登录</span>
             </button>
           </div>
         </div>
@@ -253,12 +253,12 @@ export default function Admin() {
             <div className="p-6 lg:p-8 flex items-center justify-between gap-4 border-b border-white/10">
               <div>
                 <div className="text-[10px] uppercase tracking-[0.28em] text-white/45 font-bold">
-                  Metrics
+                  关键指标
                 </div>
-                <div className="mt-2 text-lg font-bold tracking-tight">Core KPIs</div>
+                <div className="mt-2 text-lg font-bold tracking-tight">核心 KPI</div>
               </div>
               <div className="text-[11px] text-white/40">
-                Session issued: {issuedAt ? new Date(issuedAt * 1000).toLocaleString() : "—"}
+                会话签发时间: {issuedAt ? new Date(issuedAt * 1000).toLocaleString() : "—"}
               </div>
             </div>
 
@@ -285,13 +285,13 @@ export default function Admin() {
             <div className="px-6 lg:px-8 pb-6">
               <div className="rounded-3xl border border-white/10 bg-white/4 p-5 flex items-center justify-between">
                 <div>
-                  <div className="text-sm font-bold">Next: connect DB + analytics</div>
+                  <div className="text-sm font-bold">下一步：接入数据库与分析系统</div>
                   <div className="mt-1 text-[12px] text-white/45">
                     建议用 Supabase: Auth + Postgres + Edge logs。我们可以把 search/extract/rehost 的调用量写到一张 usage 表。
                   </div>
                 </div>
                 <div className="hidden sm:flex items-center gap-2 text-[12px] font-semibold text-white/70">
-                  <span>Plan</span>
+                  <span>后续规划</span>
                   <ArrowUpRight size={16} />
                 </div>
               </div>
@@ -307,21 +307,21 @@ export default function Admin() {
             <div className="p-6 border-b border-white/10 flex items-center justify-between">
               <div>
                 <div className="text-[10px] uppercase tracking-[0.28em] text-white/45 font-bold">
-                  Activity
+                  实时动态
                 </div>
-                <div className="mt-2 text-lg font-bold tracking-tight">Recent Events</div>
+                <div className="mt-2 text-lg font-bold tracking-tight">最近事件</div>
               </div>
             </div>
 
             <div className="p-6">
               <label className="text-[11px] font-bold text-white/45 uppercase tracking-[0.22em]">
-                Filter
+                筛选
               </label>
               <div className="mt-2 relative">
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search events"
+                  placeholder="搜索事件"
                   className="w-full h-11 rounded-2xl bg-black/30 border border-white/10 px-4 pr-10 text-sm text-white placeholder:text-white/25 outline-none focus:ring-4 focus:ring-white/10 focus:border-white/20 transition"
                 />
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40">
@@ -365,10 +365,10 @@ export default function Admin() {
           >
             <div className="p-6 lg:p-8 flex items-center justify-between gap-4 border-b border-white/10">
               <div>
-                <div className="text-[10px] uppercase tracking-[0.28em] text-white/45 font-bold">Admin</div>
-                <div className="mt-2 text-lg font-bold tracking-tight">Management</div>
+                <div className="text-[10px] uppercase tracking-[0.28em] text-white/45 font-bold">管理</div>
+                <div className="mt-2 text-lg font-bold tracking-tight">后台功能</div>
               </div>
-              <div className="text-[11px] text-white/40">Open modules</div>
+              <div className="text-[11px] text-white/40">进入子模块</div>
             </div>
             <div className="p-6 lg:p-8 grid grid-cols-1 md:grid-cols-2 gap-4">
               <button
@@ -376,13 +376,13 @@ export default function Admin() {
                 className="text-left rounded-3xl border border-white/10 bg-gradient-to-b from-white/6 to-transparent p-6 hover:bg-white/7 transition"
               >
                 <div className="flex items-center justify-between">
-                  <div className="text-[10px] uppercase tracking-[0.26em] font-bold text-white/45">Users</div>
+                  <div className="text-[10px] uppercase tracking-[0.26em] font-bold text-white/45">用户</div>
                   <div className="w-10 h-10 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center">
                     <Users size={18} className="text-white/75" />
                   </div>
                 </div>
-                <div className="mt-3 text-xl font-bold tracking-tight">User Directory</div>
-                <div className="mt-2 text-[12px] text-white/45">Search, status, plan badges (UI skeleton)</div>
+                <div className="mt-3 text-xl font-bold tracking-tight">用户目录</div>
+                <div className="mt-2 text-[12px] text-white/45">用户搜索、状态控制、套餐标识 (UI 骨架)</div>
               </button>
 
               <button
@@ -390,13 +390,13 @@ export default function Admin() {
                 className="text-left rounded-3xl border border-white/10 bg-gradient-to-b from-white/6 to-transparent p-6 hover:bg-white/7 transition"
               >
                 <div className="flex items-center justify-between">
-                  <div className="text-[10px] uppercase tracking-[0.26em] font-bold text-white/45">Usage</div>
+                  <div className="text-[10px] uppercase tracking-[0.26em] font-bold text-white/45">用量</div>
                   <div className="w-10 h-10 rounded-2xl border border-white/10 bg-white/5 flex items-center justify-center">
                     <Gauge size={18} className="text-white/75" />
                   </div>
                 </div>
-                <div className="mt-3 text-xl font-bold tracking-tight">Usage Analytics</div>
-                <div className="mt-2 text-[12px] text-white/45">Daily endpoint aggregates (UI skeleton)</div>
+                <div className="mt-3 text-xl font-bold tracking-tight">用量统计</div>
+                <div className="mt-2 text-[12px] text-white/45">每日接口聚合统计 (UI 骨架)</div>
               </button>
             </div>
           </motion.section>

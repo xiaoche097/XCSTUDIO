@@ -76,8 +76,8 @@ export default function AdminUsage() {
     return (
       <div className="min-h-screen bg-[#0A0A0B] text-white flex items-center justify-center">
         <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl p-6">
-          <div className="text-[10px] uppercase tracking-[0.28em] text-white/45 font-bold">Usage</div>
-          <div className="mt-2 text-lg font-bold">Checking session…</div>
+          <div className="text-[10px] uppercase tracking-[0.28em] text-white/45 font-bold">用量统计</div>
+          <div className="mt-2 text-lg font-bold">正在验证会话…</div>
         </div>
       </div>
     );
@@ -97,16 +97,16 @@ export default function AdminUsage() {
           className="inline-flex items-center gap-2 text-white/60 hover:text-white transition"
         >
           <ArrowLeft size={18} />
-          <span className="text-sm font-semibold">Back</span>
+          <span className="text-sm font-semibold">返回</span>
         </button>
 
         <div className="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/10 bg-white/5">
           <Shield size={14} className="text-cyan-300" />
-          <span className="text-[11px] font-semibold tracking-widest uppercase text-white/80">Admin · Usage</span>
+          <span className="text-[11px] font-semibold tracking-widest uppercase text-white/80">管理 · 用量统计</span>
         </div>
         <h1 className="mt-5 text-3xl lg:text-[42px] leading-tight font-serif font-light tracking-tight">
-          Usage
-          <span className="text-transparent bg-clip-text bg-gradient-to-b from-white to-white/60">Analytics</span>
+          用量
+          <span className="text-transparent bg-clip-text bg-gradient-to-b from-white to-white/60">统计</span>
         </h1>
         <p className="mt-3 text-sm text-white/55 max-w-[62ch]">
           这是用量统计 UI 的第一版骨架：按天/端点聚合的表格与基础筛选。后续接入 DB/日志后替换为真实数据。
@@ -127,8 +127,8 @@ export default function AdminUsage() {
                   <BarChart3 size={18} className="text-white/75" />
                 </div>
                 <div>
-                  <div className="text-[10px] uppercase tracking-[0.28em] text-white/45 font-bold">Daily</div>
-                  <div className="mt-1 text-lg font-bold tracking-tight">Endpoint usage</div>
+                  <div className="text-[10px] uppercase tracking-[0.28em] text-white/45 font-bold">按日</div>
+                  <div className="mt-1 text-lg font-bold tracking-tight">接口使用情况</div>
                 </div>
               </div>
 
@@ -136,7 +136,7 @@ export default function AdminUsage() {
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Filter"
+                  placeholder="筛选"
                   className="w-full h-11 rounded-2xl bg-black/30 border border-white/10 px-4 pr-10 text-sm text-white placeholder:text-white/25 outline-none focus:ring-4 focus:ring-white/10 focus:border-white/20 transition"
                 />
                 <div className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40">
@@ -150,11 +150,11 @@ export default function AdminUsage() {
                 <table className="w-full text-left min-w-[760px]">
                   <thead>
                     <tr className="text-[10px] uppercase tracking-[0.26em] text-white/35">
-                      <th className="px-4 py-3 font-bold">Day</th>
-                      <th className="px-4 py-3 font-bold">Endpoint</th>
-                      <th className="px-4 py-3 font-bold">Requests</th>
-                      <th className="px-4 py-3 font-bold">Success</th>
-                      <th className="px-4 py-3 font-bold">P95 (ms)</th>
+                      <th className="px-4 py-3 font-bold">日期</th>
+                      <th className="px-4 py-3 font-bold">接口地址</th>
+                      <th className="px-4 py-3 font-bold">请求总数</th>
+                      <th className="px-4 py-3 font-bold">成功率</th>
+                      <th className="px-4 py-3 font-bold">P95 延迟 (ms)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -190,22 +190,22 @@ export default function AdminUsage() {
                   <Activity size={18} className="text-white/75" />
                 </div>
                 <div>
-                  <div className="text-[10px] uppercase tracking-[0.28em] text-white/45 font-bold">Notes</div>
-                  <div className="mt-1 text-lg font-bold tracking-tight">What to log</div>
+                  <div className="text-[10px] uppercase tracking-[0.28em] text-white/45 font-bold">备注建议</div>
+                  <div className="mt-1 text-lg font-bold tracking-tight">日志记录指南</div>
                 </div>
               </div>
             </div>
 
             <div className="p-6 space-y-4">
               <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-                <div className="text-sm font-bold">Recommended events</div>
+                <div className="text-sm font-bold">建议记录事件</div>
                 <div className="mt-2 text-[12px] text-white/45 leading-relaxed">
                   建议在每个 Vercel Function 里记录: userId, endpoint, model/provider, latency, status, tokens(如果有)。
                 </div>
               </div>
 
               <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
-                <div className="text-sm font-bold">Data sources</div>
+                <div className="text-sm font-bold">数据源方案</div>
                 <div className="mt-2 text-[12px] text-white/45 leading-relaxed">
                   方案 A: Postgres usage 表；方案 B: Vercel Logs + 导出；方案 C: ClickHouse。
                 </div>
@@ -214,9 +214,9 @@ export default function AdminUsage() {
               <button
                 type="button"
                 className="w-full h-12 rounded-2xl bg-white text-black font-bold hover:shadow-[0_0_26px_rgba(255,255,255,0.22)] transition"
-                onClick={() => alert("Next: implement /api/admin/usage backed by DB")}
+                onClick={() => alert("下一步：实现基于数据库的用量分析接口")}
               >
-                Connect real analytics
+                接入真实分析系统
               </button>
             </div>
           </motion.aside>

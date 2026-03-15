@@ -82,8 +82,8 @@ export default function AdminUsers() {
     return (
       <div className="min-h-screen bg-[#0A0A0B] text-white flex items-center justify-center">
         <div className="w-full max-w-sm rounded-3xl border border-white/10 bg-white/5 backdrop-blur-xl p-6">
-          <div className="text-[10px] uppercase tracking-[0.28em] text-white/45 font-bold">Users</div>
-          <div className="mt-2 text-lg font-bold">Checking session…</div>
+          <div className="text-[10px] uppercase tracking-[0.28em] text-white/45 font-bold">用户管理</div>
+          <div className="mt-2 text-lg font-bold">正在验证会话…</div>
         </div>
       </div>
     );
@@ -105,15 +105,15 @@ export default function AdminUsers() {
               className="inline-flex items-center gap-2 text-white/60 hover:text-white transition"
             >
               <ArrowLeft size={18} />
-              <span className="text-sm font-semibold">Back</span>
+              <span className="text-sm font-semibold">返回</span>
             </button>
             <div className="mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-white/10 bg-white/5">
               <Shield size={14} className="text-cyan-300" />
-              <span className="text-[11px] font-semibold tracking-widest uppercase text-white/80">Admin · Users</span>
+              <span className="text-[11px] font-semibold tracking-widest uppercase text-white/80">管理 · 用户</span>
             </div>
             <h1 className="mt-5 text-3xl lg:text-[42px] leading-tight font-serif font-light tracking-tight">
-              User
-              <span className="text-transparent bg-clip-text bg-gradient-to-b from-white to-white/60">Directory</span>
+              用户
+              <span className="text-transparent bg-clip-text bg-gradient-to-b from-white to-white/60">名录</span>
             </h1>
             <p className="mt-3 text-sm text-white/55 max-w-[58ch]">
               这是用户管理的 UI 骨架：搜索、状态、套餐标识。后续接数据库后替换数据源与操作。
@@ -135,8 +135,8 @@ export default function AdminUsers() {
                 <Users size={18} className="text-white/75" />
               </div>
               <div>
-                <div className="text-[10px] uppercase tracking-[0.28em] text-white/45 font-bold">Users</div>
-                <div className="mt-1 text-lg font-bold tracking-tight">All accounts</div>
+                <div className="text-[10px] uppercase tracking-[0.28em] text-white/45 font-bold">用户</div>
+                <div className="mt-1 text-lg font-bold tracking-tight">所有账号</div>
               </div>
             </div>
 
@@ -144,7 +144,7 @@ export default function AdminUsers() {
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search by email or id"
+                placeholder="通过邮箱或 ID 搜索"
                 className="w-full h-11 rounded-2xl bg-black/30 border border-white/10 px-4 pr-10 text-sm text-white placeholder:text-white/25 outline-none focus:ring-4 focus:ring-white/10 focus:border-white/20 transition"
               />
               <div className="absolute right-3 top-1/2 -translate-y-1/2 text-white/40">
@@ -158,11 +158,11 @@ export default function AdminUsers() {
               <table className="w-full text-left min-w-[760px]">
                 <thead>
                   <tr className="text-[10px] uppercase tracking-[0.26em] text-white/35">
-                    <th className="px-4 py-3 font-bold">User</th>
-                    <th className="px-4 py-3 font-bold">Plan</th>
-                    <th className="px-4 py-3 font-bold">Status</th>
-                    <th className="px-4 py-3 font-bold">Created</th>
-                    <th className="px-4 py-3 font-bold">Action</th>
+                    <th className="px-4 py-3 font-bold">用户</th>
+                    <th className="px-4 py-3 font-bold">套餐</th>
+                    <th className="px-4 py-3 font-bold">状态</th>
+                    <th className="px-4 py-3 font-bold">创建日期</th>
+                    <th className="px-4 py-3 font-bold">操作</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -195,7 +195,7 @@ export default function AdminUsers() {
                           )}
                         >
                           {r.status === "active" ? <CheckCircle2 size={14} /> : <Ban size={14} />}
-                          {r.status}
+                          {r.status === "active" ? "正常" : "禁用"}
                         </span>
                       </td>
                       <td className="px-4 py-4 text-[12px] text-white/55">{r.createdAt}</td>
@@ -203,9 +203,9 @@ export default function AdminUsers() {
                         <button
                           type="button"
                           className="h-10 px-4 rounded-2xl border border-white/10 bg-white/5 hover:bg-white/10 transition text-sm font-semibold"
-                          onClick={() => alert("MVP: connect DB to enable actions")}
+                          onClick={() => alert("MVP阶段：接入数据库后开启管理操作")}
                         >
-                          Manage
+                          管理
                         </button>
                       </td>
                     </tr>
