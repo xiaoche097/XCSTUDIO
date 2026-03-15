@@ -53,7 +53,7 @@ export default function Login() {
       }
 
       setStatus("idle");
-      navigate(ROUTES.dashboard);
+      navigate(ROUTES.admin);
     } catch (err: any) {
       setStatus("error");
       setErrorMsg("网络连接异常，请稍后重试");
@@ -64,9 +64,9 @@ export default function Login() {
     <div className="min-h-screen bg-[#050505] text-white selection:bg-rose-500/30 selection:text-white relative overflow-hidden font-sans">
       {/* Dynamic Background */}
       <div className="absolute inset-0 pointer-events-none">
-        <div className={cn("absolute -top-[20%] -left-[10%] w-[70vw] h-[70vw] rounded-full blur-[120px] opacity-40 transition-all duration-1000", `bg-gradient-to-br ${accent}`)} />
-        <div className="absolute -bottom-[30%] -right-[10%] w-[60vw] h-[60vw] rounded-full blur-[140px] opacity-30 bg-gradient-to-tr from-indigo-500/20 via-rose-500/10 to-transparent" />
-        <div className="absolute inset-0 opacity-[0.03] pointer-events-none noise-bg" />
+                <div className={cn("absolute -top-[20%] -left-[10%] w-[70vw] h-[70vw] rounded-full blur-[120px] opacity-40 transition-all duration-1000", `bg-gradient-to-br ${accent}`)} />
+                <div className="absolute -bottom-[30%] -right-[10%] w-[60vw] h-[60vw] rounded-full blur-[140px] opacity-30 bg-gradient-to-tr from-indigo-500/20 via-rose-500/10 to-transparent" />
+                <div className="absolute inset-0 opacity-[0.03] pointer-events-none noise-bg" />
       </div>
 
       <header className="relative z-10 h-20 px-6 lg:px-12 flex items-center justify-between">
