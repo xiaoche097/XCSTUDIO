@@ -35,7 +35,7 @@ export function buildEcommerceProposals(
                 params: {
                     prompt: basePrompt + ECOMMERCE_VARIANTS[i].suffix,
                     aspectRatio: baseParams.aspectRatio || '1:1',
-                    model: baseParams.model || 'Nano Banana Pro'
+                    model: baseParams.model || 'nanobanana2'
                 }
             }]
         });

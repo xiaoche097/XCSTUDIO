@@ -64,7 +64,7 @@ ${SHARED_JSON_RULES}
       "skillName": "generateImage",
         "params": {
           "prompt": "[Subject]..., [Style]..., [Composition]..., [Lighting]..., [Quality]...",
-          "model": "Nano Banana Pro",
+          "model": "nanobanana2",
           "aspectRatio": "3:4",
           "referenceImage": "ATTACHMENT_0",
           "referenceMode": "product",
@@ -89,7 +89,7 @@ ${SHARED_JSON_RULES}
         "params": {
           "prompt": "Minimalist poster design of [Subject], [Environment], Swiss Style, soft studio lighting, Rule of thirds composition, abundant negative space, 8K, Behance feature",
           "aspectRatio": "3:4",
-          "model": "Nano Banana Pro"
+          "model": "nanobanana2"
         }
       }]
     }

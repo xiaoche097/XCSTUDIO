@@ -47,6 +47,22 @@ type TopicSnapshot = {
     };
     lastPlan?: any;
   };
+
+  // Generic listing workflows (e.g. Amazon listing sets)
+  listing?: {
+    amazonListing?: {
+      updatedAt: number;
+      productImageUrls?: string[];
+      plan?: any;
+      remaining?: any[];
+    };
+  };
+};
+
+type PinnedPatch = {
+  constraints?: string[];
+  decisions?: string[];
+  mode?: 'merge' | 'replace';
 };
 
 type TopicMemoryItem = {
@@ -142,16 +158,30 @@ export async function upsertTopicSnapshot(topicId: string, patch: Partial<TopicS
   if (!topicId) return;
   const loaded = await loadSnapshotByAnyKey(topicId);
   const current = await migrateSnapshotKeyIfNeeded(topicId, loaded);
+
+  const pinnedPatch = (patch.pinned as any) as PinnedPatch | undefined;
+  const pinnedMode: 'merge' | 'replace' = pinnedPatch?.mode === 'replace' ? 'replace' : 'merge';
+  const incomingConstraints = pinnedMode === 'replace'
+    ? (pinnedPatch?.constraints ?? [])
+    : (pinnedPatch?.constraints || []);
+  const incomingDecisions = pinnedMode === 'replace'
+    ? (pinnedPatch?.decisions ?? [])
+    : (pinnedPatch?.decisions || []);
+
+  const baseConstraints = pinnedMode === 'replace' ? [] : (current?.pinned?.constraints || []);
+  const baseDecisions = pinnedMode === 'replace' ? [] : (current?.pinned?.decisions || []);
+
   const next: TopicSnapshot = {
     memoryKey: topicId,
     topicId: parseMemoryKey(topicId)?.conversationId || topicId,
     updatedAt: Date.now(),
     summaryText: patch.summaryText ?? current?.summaryText ?? '',
     pinned: {
-      constraints: dedupe([...(current?.pinned?.constraints || []), ...(patch.pinned?.constraints || [])]).slice(0, 60),
-      decisions: dedupe([...(current?.pinned?.decisions || []), ...(patch.pinned?.decisions || [])]).slice(0, 60),
+      constraints: dedupe([...(baseConstraints || []), ...(incomingConstraints || [])]).slice(0, 60),
+      decisions: dedupe([...(baseDecisions || []), ...(incomingDecisions || [])]).slice(0, 60),
     },
     clothingStudio: patch.clothingStudio ?? current?.clothingStudio,
+    listing: patch.listing ?? current?.listing,
   };
   await putSnapshot(next);
 }
@@ -283,6 +313,26 @@ export async function syncClothingTopicMemory(topicId: string, patch: Partial<No
   });
 }
 
+export async function syncAmazonListingTopicMemory(
+  topicId: string,
+  patch: Partial<NonNullable<NonNullable<TopicSnapshot['listing']>['amazonListing']>>,
+): Promise<void> {
+  if (!topicId) return;
+  const loaded = await loadSnapshotByAnyKey(topicId);
+  const current = loaded.snapshot;
+  const next = {
+    ...(current?.listing?.amazonListing || { updatedAt: Date.now() }),
+    ...patch,
+    updatedAt: Date.now(),
+  };
+  await upsertTopicSnapshot(topicId, {
+    listing: {
+      ...(current?.listing || {}),
+      amazonListing: next,
+    },
+  });
+}
+
 export function extractConstraintHints(text: string): string[] {
   const t = text || '';
   const list: string[] = [];
@@ -300,11 +350,13 @@ export async function buildTopicPinnedContext(topicId: string): Promise<{ text: 
   const constraints = snapshot.pinned?.constraints || [];
   const decisions = snapshot.pinned?.decisions || [];
   const c = snapshot.clothingStudio;
+  const listing = snapshot.listing?.amazonListing;
   const refs = [
     c?.productAnchorRef?.url,
     c?.modelAnchorSheetRef?.url,
     ...(c?.productImageRefs || []).map((x) => x.url),
     c?.modelRef?.url,
+    ...(listing?.productImageUrls || []),
   ].filter((x): x is string => !!x).slice(0, 8);
 
   const blocks: string[] = [];

@@ -18,6 +18,7 @@ import { useAgentStore } from "../../stores/agent.store";
 import { collectReferenceCandidates } from "./utils/reference-images";
 import { sanitizeObject, sanitizeStringBase64 } from "./utils/payload-sanitizer";
 import { createMaskDataUrl } from "./utils/mask-generator";
+import { loadTopicSnapshot } from "../topic-memory";
 
 // 带指数退避的重试工具（用于 analyzeAndPlan 等内部调用）
 const retryAsync = async <T>(
@@ -260,7 +261,8 @@ export abstract class EnhancedBaseAgent {
         aspectRatio,
         quality: "hd",
         resolution: "2048x2048",
-        model: "Nano Banana Pro",
+        // Keep default aligned with provider alias routing.
+        model: "nanobanana2",
       },
     };
 
@@ -318,7 +320,7 @@ export abstract class EnhancedBaseAgent {
   ): any[] {
     const safeCount = Math.max(1, Math.min(count || 5, 8));
     const aspectRatio = (metadata?.preferredAspectRatio as string) || "1:1";
-    const model = "Nano Banana Pro";
+    const model = "nanobanana2";
     const variants = [
       {
         title: "白底主图",
@@ -792,7 +794,7 @@ export abstract class EnhancedBaseAgent {
         // 尝试从 proposal 内提取 prompt（AI 可能把 prompt 直接放到 proposal 顶层）
         const prompt =
           p.prompt || p.imagePrompt || p.image_prompt || p.params?.prompt || "";
-        const model = p.model || p.params?.model || "Nano Banana Pro";
+        const model = p.model || p.params?.model || "nanobanana2";
         const ratio =
           p.aspectRatio ||
           p.aspect_ratio ||
@@ -845,7 +847,7 @@ export abstract class EnhancedBaseAgent {
                 skillName: "generateImage",
                 params: {
                   prompt: fallbackPrompt,
-                  model: "Nano Banana Pro",
+                  model: "nanobanana2",
                   aspectRatio: "1:1",
                 },
               },
@@ -916,7 +918,7 @@ export abstract class EnhancedBaseAgent {
               skillName: "generateImage",
               params: {
                 prompt: planPrompt,
-                model: plan.model || "Nano Banana Pro",
+                 model: plan.model || "nanobanana2",
                 aspectRatio: plan.aspectRatio || plan.aspect_ratio || "1:1",
               },
             },
@@ -1303,7 +1305,7 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
 {
   "analysis": "...",
   "preGenerationMessage": "调用工具前的设计师沟通文案",
-  "skillCalls": [{"skillName": "generateImage", "params": {"prompt": "...", "referenceImages": ["ATTACHMENT_0", "ATTACHMENT_1"], "referenceImage": "ATTACHMENT_0", "aspectRatio": "1:1", "model": "Nano Banana Pro"}}],
+  "skillCalls": [{"skillName": "generateImage", "params": {"prompt": "...", "referenceImages": ["ATTACHMENT_0", "ATTACHMENT_1"], "referenceImage": "ATTACHMENT_0", "aspectRatio": "1:1", "model": "nanobanana2"}}],
   "message": "...",
   "postGenerationSummary": "...",
   "suggestions": ["..."]
@@ -1521,7 +1523,7 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
 
     // --- 进度反馈增强逻辑 (Patch v16) ---
     const progressSteps = [
-      "正在连接 Nano Banana Pro 模型...",
+      "正在连接 nanobanana2 模型...",
       "正在分析视觉元素与构图构思...",
       "正在渲染高动态范围光影细节...",
       "正在进行 2K 超清分辨率优化...",
@@ -1612,6 +1614,30 @@ ${productSection}${quantitySection}${multiImageSection}${forcedToolSection}${mul
 
     if (!call.params || typeof call.params !== "object") {
       call.params = {};
+    }
+
+    // Amazon listing resume: if topic memory has remaining shots and caller didn't specify shots,
+    // auto-inject them so the workflow can continue without repeating completed shots.
+    if (call.skillName === "amazonListing") {
+      try {
+        const topicId = String(task.input.metadata?.topicId || "").trim();
+        const hasExplicitShots = Array.isArray(call.params?.shots) && call.params.shots.length > 0;
+        if (topicId && !hasExplicitShots) {
+          const snapshot = await loadTopicSnapshot(topicId);
+          const remaining = snapshot?.listing?.amazonListing?.remaining;
+          if (Array.isArray(remaining) && remaining.length > 0) {
+            call.params.shots = remaining;
+            if (call.params.count == null) {
+              call.params.count = remaining.length;
+            }
+            console.log(
+              `[${this.agentInfo.id}] Injected amazonListing shots from topic memory: ${remaining.length}`,
+            );
+          }
+        }
+      } catch (e) {
+        console.warn(`[${this.agentInfo.id}] Failed to inject amazonListing remaining shots`, e);
+      }
     }
 
     if (!AVAILABLE_SKILLS[call.skillName as keyof typeof AVAILABLE_SKILLS]) {

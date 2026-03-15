@@ -46,7 +46,7 @@ const PROMPT_CONTENT = `# Role: 电影级分镜故事板总监 (Cameron)
           "prompt": "Cinematic storyboard... [镜头描述...]",
           "referenceImage": "ATTACHMENT_0",
           "aspectRatio": "9:16",
-          "model": "Nano Banana Pro"
+          "model": "nanobanana2"
         }
       }
     ]

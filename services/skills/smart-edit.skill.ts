@@ -22,7 +22,7 @@ export async function smartEditSkill(params: SmartEditParams): Promise<string | 
     let finalPrompt = promptTemplate;
 
     // Determine the model to use - upscale usually works best with the Pro image model
-    const generationModel = params.parameters?.model || 'Nano Banana Pro';
+    const generationModel = params.parameters?.model || (params.editType === 'upscale' ? 'Nano Banana Pro' : 'nanobanana2');
 
     // 2-Step Generation: If the prompt looks like a framework (meta-prompt), refine it first via Flash
     const isMetaPrompt = promptTemplate.includes('【') || promptTemplate.includes('══');

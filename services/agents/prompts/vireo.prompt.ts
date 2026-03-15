@@ -42,7 +42,7 @@ ${SHARED_JSON_RULES}
           "referenceImage": "ATTACHMENT_0",
           "referenceMode": "product",
           "referencePriority": "first",
-          "model": "Nano Banana Pro"
+          "model": "nanobanana2"
         }
       }]
     }
@@ -58,7 +58,7 @@ ${SHARED_JSON_RULES}
       "skillName": "generateImage",
       "params": {
         "prompt": "[Subject]..., [Style]..., [Composition]..., [Lighting]...",
-        "model": "Nano Banana Pro",
+        "model": "nanobanana2",
         "aspectRatio": "1:1",
         "referenceImage": "ATTACHMENT_0",
         "referenceMode": "product",

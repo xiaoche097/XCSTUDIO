@@ -220,6 +220,7 @@ import {
   extractConstraintHints,
   saveTopicAsset,
   rememberApprovedAsset,
+  syncAmazonListingTopicMemory,
   syncClothingTopicMemory,
   upsertTopicSnapshot,
   loadTopicSnapshot,
@@ -3239,12 +3240,24 @@ const Workspace: React.FC = () => {
       // --- [XC-STUDIO 优化] 标记点编辑指令增强 ---
       const hasMarkers = inputBlocks.some(b => b.type === "file" && b.file && (b.file as any).markerId);
 
+      const parseAspectRatioFromText = (value: string): string | null => {
+        const t = String(value || '');
+        const m = t.match(/\b(1:1|3:4|4:3|9:16|16:9|21:9|3:2|2:3|4:5|5:4)\b/);
+        return m ? m[1] : null;
+      };
+
+      const skillDefaults = (skillData?.config?.defaults || {}) as any;
+      const aspectRatioOverride =
+        parseAspectRatioFromText(text) ||
+        (typeof skillDefaults.aspectRatio === 'string' ? skillDefaults.aspectRatio : null);
+
       const requestMetadata = {
         topicId: effectiveTopicId,
         enableWebSearch: isWeb,
         creationMode,
         preferredAspectRatio:
-          creationMode === "video" ? videoGenRatio : imageGenRatio,
+          aspectRatioOverride ||
+          (creationMode === "video" ? videoGenRatio : imageGenRatio),
         skillData,
         forceToolCall: hasMarkers, // 标记点场景强制出图
         multimodalContext: {
@@ -3351,6 +3364,46 @@ const Workspace: React.FC = () => {
           store.actions.updateMessage(result.id, agentMsg);
         } else {
           addMessage(agentMsg);
+        }
+
+        // Amazon listing: persist product refs + plan into topic memory for later turns.
+        if (skillData?.id === "amazon-listing") {
+          try {
+            const store2 = useAgentStore.getState();
+            const userMessage = store2.messages.find((m) => m.id === userMsg.id) as any;
+            const productImageUrls = Array.isArray(userMessage?.attachments)
+              ? (userMessage.attachments as any[])
+                  .map((u) => String(u || "").trim())
+                  .filter((u) => /^https?:\/\//i.test(u))
+                  .slice(0, 6)
+              : [];
+
+            const analysisCall = (result.output?.skillCalls || []).find(
+              (s: any) => s?.success && s?.skillName === "analyzeListingProduct" && s?.result && typeof s.result === "object",
+            );
+            const plan = analysisCall?.result?.recommendedShotPlan;
+
+            // Try to capture remaining shots from the listing generation call (resume support)
+            const listingCall = (result.output?.skillCalls || []).find(
+              (s: any) => s?.success && s?.skillName === "amazonListing" && s?.result && typeof s.result === "object",
+            );
+            const remaining = listingCall?.result?.remainingShots;
+
+            if (effectiveTopicId) {
+              await syncAmazonListingTopicMemory(effectiveTopicId, {
+                productImageUrls,
+                plan,
+                remaining,
+              });
+
+              // Optional: reset pinned context for a clean listing workflow turn
+              await upsertTopicSnapshot(effectiveTopicId, {
+                pinned: { constraints: [], decisions: [], mode: "replace" } as any,
+              });
+            }
+          } catch (e) {
+            console.warn("[Workspace] syncAmazonListingTopicMemory failed", e);
+          }
         }
 
         // --- [XC-STUDIO 优化] 生成成功后自动清理标记点与输入状态 ---
@@ -3478,6 +3531,8 @@ const Workspace: React.FC = () => {
       prevSelectedIdsRef.current = ids;
       return;
     }
+
+    // Amazon listing flow is handled in handleSend().
     // 选中列表变为空时，清除重置
     if (ids.length === 0) {
       clearPendingAttachments();

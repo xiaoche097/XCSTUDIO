@@ -372,7 +372,7 @@ export const AssistantSidebar: React.FC<AssistantSidebarProps> = ({
 
                         <div className="flex flex-wrap gap-2.5">
                             <button
-                                onClick={() => handleSend(buildQuickSkillPrompt('请帮我设计一套亚马逊产品Listing图'), undefined, webEnabled, { id: 'amazon-listing', name: '亚马逊产品套图', iconName: 'Store', config: { twoStep: true } })}
+                                onClick={() => handleSend(buildQuickSkillPrompt('请帮我设计一套亚马逊产品Listing图'), undefined, webEnabled, { id: 'amazon-listing', name: '亚马逊产品套图', iconName: 'Store', config: { twoStep: true, defaults: { aspectRatio: '3:4', count: 3, imageSize: '2K', model: 'nanobanana2' } } })}
                                 className="inline-flex items-center gap-2 px-4 py-2.5 bg-white border border-gray-200 rounded-full text-sm font-medium text-gray-700 hover:border-gray-400 hover:text-gray-900 hover:shadow-sm transition-all cursor-pointer"
                             >
                                 <Store size={15} strokeWidth={1.8} />

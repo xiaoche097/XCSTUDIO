@@ -66,7 +66,8 @@ const resolveVideoModel = (model: string): string => {
 
 const resolveImageModel = (model: string): string => {
   // 兜底修复：历史错误模型名会触发代理 "No available channels"
-  if (!model || model === "Auto") return "Nano Banana Pro";
+  // Default model should be NanoBanana2 (alias: nanobanana2)
+  if (!model || model === "Auto") return "NanoBanana2";
   const lower = model.toLowerCase();
   if (lower === "nanobanana2" || lower === "nanobanana 2") return "NanoBanana2";
   if (lower === "gemini-3-pro-image-preview") return "Nano Banana Pro";

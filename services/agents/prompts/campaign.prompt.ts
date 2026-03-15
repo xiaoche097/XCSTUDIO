@@ -156,7 +156,7 @@ ${SHARED_JSON_RULES}
       "params": {
         "prompt": "[ROLE] You are an e-commerce commercial photographer and visual director.\\n\\n[PRODUCT ANCHOR] Use the FIRST reference image as the product ground truth. Keep the exact product design, shape, materials, colors, and key details.\\n\\n[IDENTITY ANCHOR - if provided] Use the SECOND reference image only to keep the same model identity (face/body). Do not change the product.\\n\\n[SHOT INTENT] Create a single image for: {shotId}. Marketing goal: {marketingGoal}. Key message: {keyMessage}.\\n\\n[COMPOSITION] {composition}. Clean, premium composition with clear subject separation.\\n\\n[LIGHTING & BACKGROUND] {lighting/background decision from shotPlan}. Realistic studio lighting, high fidelity.\\n\\n[DETAIL EMPHASIS] Emphasize: {differentiator or spec}. Make it visually obvious.\\n\\n[RESTRICTIONS] no text, no watermark, no logo overlay, no QR code, no collage, no mosaic, no split-screen, no extra products, no distracting props unless specified, avoid deformation, avoid incorrect colors.",
         "aspectRatio": "1:1",
-        "model": "Nano Banana Pro",
+        "model": "nanobanana2",
         "referenceImages": ["ATTACHMENT_1", "ATTACHMENT_0"],
         "referenceMode": "product",
         "referencePriority": "first",

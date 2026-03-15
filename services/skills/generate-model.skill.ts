@@ -49,7 +49,7 @@ export async function generateModelSkill(params: { options: ModelGenOptions; pre
     const prompt = `Generate a studio model identity anchor image, ${views[i]}. gender: ${gender}; age: ${ageRange}; skin tone: ${skinTone}; pose: ${pose}; expression: ${expression}; hairstyle: ${hairstyle}; makeup: ${makeup}; ${extra}.\nSTRICT OUTFIT: plain white top and plain white long pants only, no logo, no prints, no jewelry, no bag, no hat, no extra accessories.\nSTRICT BACKGROUND: pure white background #FFFFFF, no props, no scene, no gradient.\nPOSE: full body in frame, natural standing, arms down, consistent identity.\n${modelConstraints}`;
     const rawUrl = await imageGenSkill({
       prompt,
-      model: params.preferredImageModel || 'Nano Banana Pro',
+      model: params.preferredImageModel || 'nanobanana2',
       aspectRatio: '3:4',
       imageSize: '2K',
     });
