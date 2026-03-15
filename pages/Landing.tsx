@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import { Sparkles, ArrowRight, Play } from "lucide-react";
+import { ROUTES } from "../utils/routes";
 
 const slides = [
     {
@@ -56,7 +57,7 @@ export const Landing = () => {
     }, []);
 
     const handleStart = () => {
-        navigate(`/dashboard`);
+        navigate(ROUTES.login);
     };
 
     const currentSlide = slides[currentSlideIndex];

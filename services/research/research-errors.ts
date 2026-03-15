@@ -7,6 +7,7 @@ const ENDPOINT_LABELS: Record<ResearchEndpoint, string> = {
 };
 
 const FRIENDLY_ERROR_MAP: Record<string, string> = {
+  unauthorized: '请先登录后台',
   extract_timeout: '网页提取超时，请稍后重试',
   content_too_large: '网页内容过大，暂不支持提取',
   unsupported_content_type: '网页内容类型不支持提取',

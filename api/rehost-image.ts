@@ -1,8 +1,12 @@
+import { requireAdmin } from "./_utils/auth";
+
 type RehostRequest = {
   imageUrl?: string;
 };
 
 export default async function handler(req: any, res: any) {
+  if (!requireAdmin(req, res)) return;
+
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
   }

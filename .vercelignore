@@ -1,0 +1,15 @@
+node_modules
+XC-VIDEO/node_modules
+dist
+XC-VIDEO/dist
+XC-VIDEO/public
+build_output.txt
+result.txt
+tsc-output.txt
+tsc_errors.txt
+debug-instructions.txt
+div_report.txt
+open_divs.txt
+close_divs.txt
+input_area_fixed.txt
+*.log

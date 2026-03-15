@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build:video": "cd XC-VIDEO && npm install && npm run build",
+    "build:video": "npm ci --prefix XC-VIDEO --include=dev && npm run build --prefix XC-VIDEO",
     "build": "npm run build:video && vite build",
     "preview": "vite preview",
     "test:optimizer": "node --experimental-strip-types --test services/agents/prompt-optimizer/*.test.ts services/agents/utils/*.test.ts"

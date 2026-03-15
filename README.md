@@ -108,6 +108,35 @@ npm run dev
 
 ---
 
+## ☁️ Vercel 部署 (Vite + Vercel Functions)
+
+本项目使用 Vite 构建静态站点，并用 `api/` 目录下的 Vercel Functions 作为后端。
+
+### 1) Vercel 项目设置
+
+- **Build Command**: `npm run build`
+- **Output Directory**: `dist`
+
+### 2) 环境变量 (Project → Settings → Environment Variables)
+
+必填:
+
+- `ADMIN_PASSWORD`: 管理员口令 (用于登录 `/login`)
+- `SESSION_SECRET`: 会话签名密钥 (建议 32+ 位随机)
+
+可选:
+
+- `BING_SEARCH_API_KEY`: Bing Web Search API Key (启用更强的检索)
+- `IMGBB_API_KEY`: ImgBB API Key (启用图片中转)
+
+### 3) 登录与接口访问
+
+- 访问 `/login` 使用 `ADMIN_PASSWORD` 登录
+- 登录成功后将写入 HttpOnly Cookie
+- 未登录访问受保护接口会返回 401，并在前端自动跳转到 `/login`
+
+---
+
 ## ⌨️ 专业快捷键
 
 - `空格 (Space)` + **拖拽**: 平移工作区

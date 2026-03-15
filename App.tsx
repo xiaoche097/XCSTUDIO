@@ -9,6 +9,7 @@ const Projects = lazy(() => import('./pages/Projects'));
 const Settings = lazy(() => import('./pages/Settings'));
 const VideoWorkspace = lazy(() => import('./pages/VideoWorkspace'));
 const Landing = lazy(() => import('./pages/Landing'));
+const Login = lazy(() => import('./pages/Login'));
 
 const App: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
   return (
@@ -17,6 +18,7 @@ const App: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
         <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
           <Routes>
             <Route path={ROUTES.landing} element={<Landing />} />
+            <Route path={ROUTES.login} element={<Login />} />
             <Route path={ROUTES.dashboard} element={<Home onExit={onExit} />} />
             <Route path={ROUTES.projects} element={<Projects onExit={onExit} />} />
             <Route path={`${ROUTES.workspace}/:id`} element={<Workspace />} />

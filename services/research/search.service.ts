@@ -1,5 +1,13 @@
 import { normalizeResearchApiError, normalizeUnknownResearchError } from './research-errors';
 import { logResearchTelemetry } from './research-telemetry';
+import { ROUTES } from '../../utils/routes';
+
+function redirectToLoginIfNeeded(status: number) {
+  if (status !== 401) return;
+  if (typeof window === 'undefined') return;
+  if (window.location.pathname === ROUTES.login) return;
+  window.location.assign(ROUTES.login);
+}
 
 export type ResearchSearchMode = "web+images" | "web" | "images";
 
@@ -74,6 +82,7 @@ export async function runResearchSearch(
 
     const payload = await response.json();
     if (!response.ok) {
+      redirectToLoginIfNeeded(response.status);
       throw normalizeResearchApiError('search', response.status, payload);
     }
 
@@ -121,6 +130,7 @@ export async function extractWebPage(url: string): Promise<ExtractResponse> {
     });
     const payload = await response.json();
     if (!response.ok) {
+      redirectToLoginIfNeeded(response.status);
       throw normalizeResearchApiError('extract', response.status, payload);
     }
     logResearchTelemetry('extract.success', {
@@ -153,6 +163,7 @@ export async function rehostImageUrl(imageUrl: string): Promise<RehostResponse> 
     });
     const payload = await response.json();
     if (!response.ok) {
+      redirectToLoginIfNeeded(response.status);
       throw normalizeResearchApiError('rehost-image', response.status, payload);
     }
     const result = {
