@@ -53,7 +53,7 @@ export default function Login() {
       }
 
       setStatus("idle");
-      navigate(ROUTES.admin);
+      navigate(ROUTES.dashboard);
     } catch (err: any) {
       setStatus("error");
       setErrorMsg("网络连接异常，请稍后重试");
