@@ -8,6 +8,7 @@ import {
   Plus,
   Settings,
   Video,
+  Shield,
 } from "lucide-react";
 
 interface SidebarProps {
@@ -87,6 +88,16 @@ const Sidebar: React.FC<SidebarProps> = ({ onNewProject }) => {
           >
             <Settings size={20} />
           </button>
+          <button
+            onClick={() => navigate(ROUTES.admin)}
+            className={`p-2 rounded-full transition ${isActive(ROUTES.admin) || isActive(ROUTES.adminUsers) || isActive(ROUTES.adminUsage)
+              ? "bg-gray-100 text-black shadow-sm"
+              : "text-gray-400 hover:text-black hover:bg-gray-50"
+              }`}
+            title="管理控制台"
+          >
+            <Shield size={20} />
+          </button>
         </div>
       </motion.div>
 
@@ -125,11 +136,11 @@ const Sidebar: React.FC<SidebarProps> = ({ onNewProject }) => {
           <span className="text-[10px] font-black uppercase tracking-tighter">视频</span>
         </button>
         <button
-          onClick={() => navigate(ROUTES.settings)}
-          className={`flex flex-col items-center gap-1 ${isActive(ROUTES.settings) ? "text-black" : "text-gray-400"}`}
+          onClick={() => navigate(ROUTES.admin)}
+          className={`flex flex-col items-center gap-1 ${isActive(ROUTES.admin) ? "text-black" : "text-gray-400"}`}
         >
-          <Settings size={20} strokeWidth={isActive(ROUTES.settings) ? 2.5 : 2} />
-          <span className="text-[10px] font-black uppercase tracking-tighter">设置</span>
+          <Shield size={20} strokeWidth={isActive(ROUTES.admin) ? 2.5 : 2} />
+          <span className="text-[10px] font-black uppercase tracking-tighter">管理</span>
         </button>
       </div>
     </>

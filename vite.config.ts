@@ -12,6 +12,9 @@ export default defineConfig(({ mode }) => {
       host: "0.0.0.0",
     },
     plugins: [react()],
+    esbuild: {
+      drop: mode === "production" ? ["console", "debugger"] : [],
+    },
     build: {
       outDir: "dist",
       assetsDir: "assets",

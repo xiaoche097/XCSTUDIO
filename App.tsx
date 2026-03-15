@@ -10,6 +10,9 @@ const Settings = lazy(() => import('./pages/Settings'));
 const VideoWorkspace = lazy(() => import('./pages/VideoWorkspace'));
 const Landing = lazy(() => import('./pages/Landing'));
 const Login = lazy(() => import('./pages/Login'));
+const Admin = lazy(() => import('./pages/Admin'));
+const AdminUsers = lazy(() => import('./pages/AdminUsers'));
+const AdminUsage = lazy(() => import('./pages/AdminUsage'));
 
 const App: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
   return (
@@ -19,6 +22,9 @@ const App: React.FC<{ onExit?: () => void }> = ({ onExit }) => {
           <Routes>
             <Route path={ROUTES.landing} element={<Landing />} />
             <Route path={ROUTES.login} element={<Login />} />
+            <Route path={ROUTES.admin} element={<Admin />} />
+            <Route path={ROUTES.adminUsers} element={<AdminUsers />} />
+            <Route path={ROUTES.adminUsage} element={<AdminUsage />} />
             <Route path={ROUTES.dashboard} element={<Home onExit={onExit} />} />
             <Route path={ROUTES.projects} element={<Projects onExit={onExit} />} />
             <Route path={`${ROUTES.workspace}/:id`} element={<Workspace />} />

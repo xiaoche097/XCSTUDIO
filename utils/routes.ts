@@ -1,6 +1,9 @@
 export const ROUTES = {
   landing: '/',
   login: '/login',
+  admin: '/admin',
+  adminUsers: '/admin/users',
+  adminUsage: '/admin/usage',
   dashboard: '/dashboard',
   projects: '/projects',
   workspace: '/workspace',

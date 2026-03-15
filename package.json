@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:full": "npx vercel dev",
     "build:video": "npm ci --prefix XC-VIDEO --include=dev && npm run build --prefix XC-VIDEO",
     "build": "npm run build:video && vite build",
     "preview": "vite preview",

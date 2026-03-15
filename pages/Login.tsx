@@ -46,6 +46,11 @@ export default function Login() {
       });
 
       const data = await res.json().catch(() => null);
+      if (!data) {
+        setStatus("error");
+        setErrorMsg("后端 API 未启动或响应异常（请使用 npm run dev:full 启动项目）");
+        return;
+      }
       if (!res.ok || !data?.ok) {
         setStatus("error");
         setErrorMsg(String(data?.error || "登录验证失败，请核对密码"));
