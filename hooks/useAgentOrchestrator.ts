@@ -79,6 +79,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
 
   const addAssetsToCanvas = useCallback(async (assets: GeneratedAsset[]) => {
     if (!canvasState || !onElementsUpdate || !autoAddToCanvas) {
+      console.log('[useAgentOrchestrator] Canvas integration disabled or not configured');
       return;
     }
 
@@ -86,6 +87,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
       const containerW = window.innerWidth - (canvasState.showAssistant ? 400 : 0);
       const containerH = window.innerHeight;
 
+      console.log('[useAgentOrchestrator] Processing', assets.length, 'assets for canvas');
 
       // 异步获取所有图片的原始尺寸
       const assetsWithDimensions = await Promise.all(assets.map(async (asset) => {
@@ -118,6 +120,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
         canvasState.elements.length
       );
 
+      console.log('[useAgentOrchestrator] Created', newElements.length, 'canvas elements');
 
       const updatedElements = [...canvasState.elements, ...newElements];
       onElementsUpdate(updatedElements);
@@ -126,6 +129,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
         onHistorySave(updatedElements, []);
       }
 
+      console.log('[useAgentOrchestrator] Canvas updated successfully');
     } catch (error) {
       console.error('[useAgentOrchestrator] Failed to add assets to canvas:', error);
     }
@@ -152,6 +156,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
 
     if (isProcessingRef.current) {
       messageQueue.current.push({ message, attachments, metadata, userMessageId });
+      console.log('[useAgentOrchestrator] Message queued, queue size:', messageQueue.current.length);
       return null;
     }
 
@@ -161,12 +166,14 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
     let executingTimer: ReturnType<typeof setTimeout> | null = null;
 
     try {
+      console.log('[useAgentOrchestrator] Processing message:', message.substring(0, 50));
 
       // 图片上传逻辑
       let uploadedUrls: string[] = [];
       if (attachments && attachments.length > 0) {
         const hostProvider = useImageHostStore.getState().selectedProvider;
         if (hostProvider !== 'none') {
+          console.log('[useAgentOrchestrator] Uploading attachments to host...');
           setIsUploadingAttachments(true);
           // 更新状态提示用户
           setCurrentTask({
@@ -219,6 +226,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
               throw new Error('图片上传结果异常，请重新上传后重试');
             }
 
+            console.log('[useAgentOrchestrator] Upload success:', uploadedUrls);
 
             // 上传成功后回填为真实公网 URL，避免后续上下文使用 blob: 占位链接
             if (userMessageId) {
@@ -329,6 +337,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
       const pipelineId = !useOptimizeThenExecute ? detectPipeline(messageForExecution) : null;
       if (pipelineId && PIPELINES[pipelineId]) {
         const pipeline = PIPELINES[pipelineId];
+        console.log('[useAgentOrchestrator] Pipeline detected:', pipeline.name);
 
         setCurrentTask({
           id: `pipeline-${Date.now()}`,
@@ -339,13 +348,16 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
           updatedAt: Date.now()
         });
 
+        console.log('[useAgentOrchestrator] Pipeline request start');
         const pipelineResult = await withTimeout(
           executePipeline(pipeline, messageForExecution, updatedContext, (stepIdx, stepResult) => {
+            console.log(`[useAgentOrchestrator] Pipeline step ${stepIdx} done:`, stepResult.status);
             setCurrentTask(stepResult);
           }),
           180000,
           '流水线执行超时，请稍后重试'
         );
+        console.log('[useAgentOrchestrator] Pipeline request done');
 
         if (pipelineResult.allAssets.length > 0) {
           addAssetsToCanvas(pipelineResult.allAssets);
@@ -363,6 +375,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
       }
 
       // Single agent routing — try local keyword match first to skip API call
+      console.log('[useAgentOrchestrator] Routing to agent...');
       const localAgent = localPreRoute(messageForExecution);
       let decision;
       if (pinnedAgent) {
@@ -374,6 +387,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
           confidence: 0.9,
         };
       } else if (localAgent) {
+        console.log('[useAgentOrchestrator] Local pre-route hit:', localAgent);
         decision = {
           action: 'route' as const,
           targetAgent: localAgent,
@@ -383,11 +397,13 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
           confidence: 0.75
         };
       } else {
+        console.log('[useAgentOrchestrator] 发起路由请求...');
         decision = await withTimeout(
           routeToAgent(messageForExecution, updatedContext),
           20000,
           '路由请求超时，请稍后重试'
         );
+        console.log('[useAgentOrchestrator] 路由请求返回:', decision?.targetAgent);
       }
 
       if (!decision) {
@@ -402,6 +418,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
         };
       }
 
+      console.log('[useAgentOrchestrator] Routed to:', decision.targetAgent);
 
       if (decision.action === 'respond' || decision.action === 'clarify') {
         const guidance = [
@@ -548,8 +565,9 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
         console.error(err);
       }
 
-
       setCurrentTask({ ...task, status: 'analyzing' });
+
+      console.log('[useAgentOrchestrator] Executing task...');
 
       // Auto-switch to executing after 200ms
       executingTimer = setTimeout(() => {
@@ -559,17 +577,21 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
         }
       }, 200);
 
+      console.log('[useAgentOrchestrator] 发起 Agent 执行请求...');
       const result = await withTimeout(
         executeAgentTask(task),
         180000,
         '任务执行超时，请稍后重试'
       );
+      console.log('[useAgentOrchestrator] 收到 Agent 执行回复');
       if (executingTimer) {
         clearTimeout(executingTimer);
         executingTimer = null;
       }
+      console.log('[useAgentOrchestrator] Task result:', result.status);
 
       if (result.output?.assets && result.output.assets.length > 0) {
+        console.log('[useAgentOrchestrator] Auto-adding assets to canvas...');
         addAssetsToCanvas(result.output.assets);
       }
 
@@ -666,6 +688,7 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
     }
 
     try {
+      console.log('[useAgentOrchestrator] Executing proposal:', proposal.title);
 
       setCurrentTask({ ...curTask, status: 'executing' });
 
@@ -692,13 +715,17 @@ export function useAgentOrchestrator(options: UseAgentOrchestratorOptions) {
         updatedAt: Date.now()
       };
 
+      console.log('[useAgentOrchestrator] Proposal request start', { proposalId });
       const result = await withTimeout(
         executeAgentTask(task),
         180000,
         '方案执行超时，请稍后重试'
       );
+      console.log('[useAgentOrchestrator] Proposal request done', { status: result.status });
+      console.log('[useAgentOrchestrator] Proposal execution result:', result.status);
 
       if (result.output?.assets && result.output.assets.length > 0) {
+        console.log('[useAgentOrchestrator] Auto-adding proposal assets to canvas...');
         addAssetsToCanvas(result.output.assets);
       }
 
